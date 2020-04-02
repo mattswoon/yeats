@@ -159,8 +159,15 @@ class Turn {
     return this.turn_status === turnStatus.RUNNING;
   }
 
-  recap() {
-    return 'Just to recap, these were the clues:\n\t\t' + this.solved_clues.map((c) => c.text).join('\n\t\t');
+  async recap(channel, redaction_time) {
+    var message = 'Just to recap, these were the clues:\n\t\t' + this.solved_clues.map((c) => c.text).join('\n\t\t')
+    console.log(`Recapping with message\n\t${message}`);
+    var promise = channel.send(message);
+    await sleep(redaction_time);
+    console.log(`Redacting recap message`);
+    promise.then(
+      (message) => message.edit("**REDACTED**")
+    );
   }
 }
 
@@ -168,6 +175,7 @@ class Game {
   constructor() {
     this.reset();
     this.turn_time = 90000;
+    this.redaction_time = 30000;
   }
 
   reset() {
@@ -236,15 +244,17 @@ class Game {
       console.log(`Ending turn with uuid=${uuid}`);
       this.turn.turn_status = turnStatus.FINISHED;
       var num_solved = this.turn.solved_clues.length;
-      var recap = this.turn.recap();
       if (num_solved == 0) {
         this.channel.send(`Atrocious ${this.turn.performer}, you didn't get any!`);
       } else if (num_solved <=2 ) {
-        this.channel.send(`Ooft ${this.turn.performer} that was rough. You solved ${num_solved}\n` + recap);
+        this.channel.send(`Ooft ${this.turn.performer} that was rough. You solved ${num_solved}\n`);
+        this.turn.recap(this.channel, this.redaction_time);
       } else if (num_solved <= 4) {
-        this.channel.send(`Hey not bad ${this.turn.performer}, you solved ${num_solved}\n` + recap);
+        this.channel.send(`Hey not bad ${this.turn.performer}, you solved ${num_solved}\n`);
+        this.turn.recap(this.channel, this.redaction_time);
       } else {
-        this.channel.send(`Nice work ${this.turn.performer}, you solved ${num_solved}\n` + recap);
+        this.channel.send(`Nice work ${this.turn.performer}, you solved ${num_solved}\n`);
+        this.turn.recap(this.channel, this.redaction_time);
       };
       this.bowl.putBack(this.turn.currently_solving);
       for (clue of this.turn.solved_clues) {
