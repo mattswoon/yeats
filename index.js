@@ -33,6 +33,23 @@ class Bowl {
   }
 
   summary() {
+    var all_clues = [].concat(this.unsolved, this.solved);
+    console.log(all_clues.map(c => c.toString()));
+    var num_entered_by = new Map;
+    var clue;
+    for (clue of all_clues) {
+      if (num_entered_by.has(clue.user)) {
+        num_entered_by.set(clue.user, num_entered_by.get(clue.user) + 1);
+      } else {
+        num_entered_by.set(clue.user, 1)
+      };
+    };
+    var summ = Array.from(num_entered_by, ([k, v]) => `\t${k}: ${v}`);
+    if (summ.length > 0) {
+      return 'Clue summary:\n' + summ.join('\n');
+    } else {
+      return 'No clues yet';
+    };
   }
 
   cluesFrom(user) {
@@ -82,6 +99,7 @@ class Bowl {
       this.unsolved.push(clue);
     };
   }
+
 }
 
 class Players {
@@ -121,6 +139,11 @@ class Players {
 
   numWaiting() {
     return this.awaiting_turn.length;
+  }
+
+  list() {
+    var l = this.players.join(', ');
+    return `Players are: ${l}`;
   }
 }
 
@@ -197,6 +220,7 @@ class Game {
   }
 
   restartGame() {
+    this.locked = false;
     this.round = rounds.SENTENCE;
     this.players.resetQueue();
     this.bowl.putAllBack();
@@ -333,8 +357,13 @@ client.on('message', (message) => {
       case '!add-clue':
         if (!game.locked) {
           text = message.content.substring(command.length).trim();
-          clue = new Clue(message.author, text);
-          game.bowl.addClue(clue);
+          if (text.length > 0) {
+            clue = new Clue(message.author, text);
+            game.bowl.addClue(clue);
+            message.reply(`Thanks, added "${text}" to the bowl`);
+          } else {
+            message.reply('Sorry, I think you entered a blank clue');
+          };
         } else {
           message.reply('Sorry the game has already started, you\'ll have to wait until the next one');
         };
@@ -402,16 +431,17 @@ client.on('message', (message) => {
         };
         break;
       case '!clue-summary':
-        message.reply('This one\'s a work-in-progress');
+        message.reply(game.bowl.summary());
         break;
       case '!list-players':
-        message.reply('This one\'s a work-in-progress');
+        message.reply(game.players.list());
         break;
       case '!game-state':
         message.reply('This one\'s a work-in-progress');
         break;
       case '!restart-game':
-        message.reply('This one\'s a work-in-progress');
+        game.restartGame();
+        message.reply('Game has been restarted, you can now add more players or clues. To start run `!start-game`');
         break;
       case '!reset-game':
         message.reply('This one\'s a work-in-progress');
