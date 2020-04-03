@@ -2,9 +2,10 @@
 I call it "irish" but I don't know what you call it - it's a game, now you can play it on discord.
 
 Everyone puts clues into a bowl, then take turns performing the clues to someone else. There's 3 rounds
- 1 - Use any words except what's written on the clue
- 2 - Use only one word that's not written on the clue
- 3 - Charades
+ 
+ 1) Use any words except what's written on the clue
+ 2) Use only one word that's not written on the clue
+ 3) Charades (or sound effects for voice only)
  
 All rounds use the same set of clues and they go back into the bowl at the end of each round.
 
@@ -33,7 +34,7 @@ Everyone is assigned a single person to perform to, when it's your turn you'll b
 
 Every time the turn queue resets (everyone has a turn) the performer-performee assignment is randomly regenerated.
 
-When it's your turn to perform, the bot with direct message you a clue. Reply to the bot or a text channel with *anything* to get the next clue - turns are too exciting to have to bother with typing a specific command!
+When it's your turn to perform, the bot will direct message you a clue. Reply to the bot or a text channel with *anything* to get the next clue - turns are too exciting to have to bother with typing a specific command!
 
 At the end of your turn the bot will recap which clues you solved - the last one shown to you is put back into the bowl. The recap message will be **REDACTED** after a certain delay, so you can't just scroll up the channel to remind yourself what clues there are.
 
