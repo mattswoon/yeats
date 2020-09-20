@@ -1,4 +1,5 @@
 use serenity::model::user::User;
+//    *game = Game::new();
 
 #[derive(Clone)]
 pub struct Player {
@@ -7,7 +8,10 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn from_user(u: &User) -> Player {
+}
+
+impl From<&User> for Player {
+    fn from(u: &User) -> Player {
         Player {
             name: u.name.clone(),
             user: u.clone()

@@ -2,88 +2,124 @@ use serenity::{
     prelude::*,
     model::prelude::*,
     client::ClientBuilder,
+    framework::standard::{
+        Args,
+        StandardFramework,
+        CommandResult,
+        macros::{command, group},
+    },
 };
-use log::warn;
+//use log::warn;
 use itertools::Itertools;
 use yeats::game::{
     game::Game,
-    player::Player
+    player::Player,
+    game_error::GameError,
+    clue::Clue
 };
 
-
 #[allow(dead_code)]
-enum CommandResponse {
-    SuccessReacc,
-    SuccessMsg(String),
-    FailReacc,
-    FailMsg(String),
-    Nothing
+#[derive(Debug)]
+enum Error {
+    NoGame,
+    GameError(GameError)
 }
 
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::NoGame => 
+                write!(f, "No Game object in context"),
+            Error::GameError(ge) => write!(f, "{}", ge),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+#[command]
+async fn reset(ctx: &Context, msg: &Message) -> CommandResult {
+    let _game = ctx.data.write()
+        .await
+        .get_mut::<Game>()
+        .map(|g| *g = Game::new())
+        .ok_or(Error::NoGame)?;
+    msg.react(ctx, '👍').await?;
+    Ok(())
+}
+
+#[command]
+#[aliases("add-players")]
+async fn add_players(ctx: &Context, msg: &Message) -> CommandResult {
+    let mut players: Vec<Player> = msg.mentions
+        .iter()
+        .map(|u| u.into())
+        .collect();
+    let _game = ctx.data.write()
+        .await
+        .get_mut::<Game>()
+        .map(|g| g.add_players(&mut players))
+        .ok_or(Error::NoGame)?;
+    msg.react(ctx, '👍').await?;
+    Ok(())
+}
+
+#[command]
+#[aliases("list-players")]
+async fn list_players(ctx: &Context, msg: &Message) -> CommandResult {
+    let reply = ctx.data.read()
+        .await
+        .get::<Game>()
+        .map(|g| g.players.iter().map(|p| p.name.clone()).join(", "))
+        .ok_or(Error::NoGame)?;
+    msg.react(ctx, '👍').await?;
+    msg.reply(ctx, format!("Players in game: {}", reply)).await?;
+    Ok(())
+}
+
+#[command]
+#[aliases("add-clue")]
+async fn add_clue(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    if msg.is_private() {
+        let clue_text = args.rest();
+        let player: Player = (&msg.author).into();
+        let _game = ctx.data.write()
+            .await
+            .get_mut::<Game>()
+            .map(|g| {
+                g.add_clue(Clue { entered_by: player,
+                                  text: clue_text.into() })
+            });
+        Ok(())
+    } else {
+        msg.reply(ctx, format!("Umm... you're supposed to dm that to me")).await?;
+        Ok(())
+    }
+}
+
+
+#[group]
+#[commands(reset, add_players)]
+struct Yeats;
 
 struct Handler;
 
-#[serenity::async_trait]
-impl EventHandler for Handler {
-    async fn message(&self, ctx: Context, msg: Message) {
-        let mut data = ctx.data.write().await;
-        let game = data.get_mut::<Game>()
-            .expect("There's supposed to be a game here");
-        let mut tail = msg.content.split(" ");
-        let head = tail.next();
-        let response = match head {
-            Some("!reset") => reset_game(game).await,
-            Some("!add-players") => add_players(game, &msg.mentions).await,
-            Some("!list-players") => list_players(game).await,
-            _ => CommandResponse::Nothing 
-        };
+impl EventHandler for Handler {}
 
-        let res_err = match response {
-            CommandResponse::SuccessReacc => msg.react(&ctx, '👍').await.map(|_| ()),
-            CommandResponse::SuccessMsg(s) => msg.reply(&ctx, s).await.map(|_| ()),
-            CommandResponse::FailReacc => msg.react(&ctx, '🙅').await.map(|_| ()),
-            CommandResponse::FailMsg(s) => msg.reply(&ctx, s).await.map(|_| ()),
-            CommandResponse::Nothing => Ok(())
-        };
-        if let Err(why) = res_err {
-            warn!("Couldn't respond because {}", why);
-        };
-    }
-}
-
-async fn reset_game(game: &mut Game) -> CommandResponse {
-    *game = Game::new();
-    CommandResponse::SuccessReacc
-}
-
-async fn add_players(game: &mut Game, users: &Vec<User>) -> CommandResponse {
-    let mut players: Vec<_> = users.iter()
-        .map(|u| Player::from_user(u))
-        .collect();
-    match game.add_players(&mut players) {
-        Ok(_) => CommandResponse::SuccessReacc,
-        Err(_) => CommandResponse::FailMsg("Can't add any more players, the game has already started!".to_string())
-    }
-}
-
-async fn list_players(game: &mut Game) -> CommandResponse {
-    CommandResponse::SuccessMsg(
-        game.players
-        .iter()
-        .map(|p| p.name.clone())
-        .join(", ")
-    )
-}
-
-
+#[tokio::main]
 async fn main() {
     let token = std::env::var("DISCORD_TOKEN")
         .expect("Coulnd't get discord token");
+
+    let framework = StandardFramework::new()
+        .configure(|c| c.prefix("!"))
+        .group(&YEATS_GROUP);
 
     let mut client = ClientBuilder::new(token)
         .type_map(TypeMap::new())
         .type_map_insert::<Game>(Game::new())
         .event_handler(Handler)
+        .framework(framework)
         .await
         .expect("client go poo poo");
 

@@ -4,6 +4,6 @@ use crate::game::{
 
 #[derive(Clone)]
 pub struct Clue {
-    entered_by: Player,
-    text: String
+    pub entered_by: Player,
+    pub text: String
 }

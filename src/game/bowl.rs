@@ -15,12 +15,7 @@ impl Bowl {
         }
     }
 
-    pub fn add_clue(self, c: Clue) -> Bowl {
-        Bowl {
-            unsolved: self.unsolved
-                .into_iter()
-                .chain(vec![c].into_iter())
-                .collect(),
-            ..self}
+    pub fn add_clue(&mut self, c: Clue) -> () {
+        self.unsolved.append(&mut vec![c]);
     }
 }

@@ -42,18 +42,23 @@ impl Game {
         }
     }
 
-//    pub fn add_clue(self, c: Clue) -> Result<Game, GameError> {
-//        match self.state {
-//            GameState::PreGame => {
-//                let bowl = self.bowl.add_clue(c);
-//                Ok(Game {
-//                    bowl: bowl,
-//                    ..self})
-//            },
-//            _ => Err(GameError::AlreadyStarted)
-//        }
-//    }
-//
+    pub fn get_player(&self, name: &str) -> Option<Player> {
+        self.players.iter()
+            .filter(|p| p.name == name)
+            .next()
+            .map(|r| r.clone())
+    }
+
+    pub fn add_clue(&mut self, c: Clue) -> Result<(), GameError> {
+        match self.state {
+            GameState::PreGame => {
+                self.bowl.add_clue(c);
+                Ok(())
+            },
+            _ => Err(GameError::AlreadyStarted)
+        }
+    }
+
 //    pub fn start_game(self) -> Result<Game, GameError> {
 //        match self.state {
 //            GameState::PreGame => {
