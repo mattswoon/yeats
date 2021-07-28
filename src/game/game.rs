@@ -2,6 +2,10 @@ use std::{
     iter::Cycle,
     vec::IntoIter
 };
+use rand::{
+    thread_rng,
+    seq::SliceRandom,
+};
 use serenity::{
     prelude::TypeMapKey,
     model::user::User,
@@ -97,6 +101,20 @@ impl Game {
         }
         Ok(())
     }
+
+    pub fn start_game(&mut self) -> Result<(), GameError> {
+        match &self.state {
+            GameState::PreGame => {
+                self.state = GameState::Round(Round::new(1, &self.players));
+                Ok(())
+            },
+            _ => Err(GameError::AlreadyStarted)
+        }
+    }
+
+    pub fn start_game_message(&self) -> String {
+        "Welcome to the game".to_string()
+    }
 }
 
 pub enum GameState {
@@ -109,4 +127,17 @@ pub enum GameState {
 pub struct Round {
     pub round_number: i64,
     pub turn_queue: Vec<Turn>
+}
+
+impl Round {
+    pub fn new(round_number: i64, players: &Vec<Player>) -> Round {
+        let mut players = players.clone();
+        let mut rng = thread_rng();
+        players.shuffle(&mut rng);
+        let turn_queue = players.iter()
+            .zip(players.iter().cycle())
+            .map(|(p1, p2)| Turn::new(p1.clone(), p2.clone()))
+            .collect();
+        Round { round_number, turn_queue }
+    }
 }

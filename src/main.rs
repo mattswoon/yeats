@@ -18,7 +18,6 @@ use yeats::game::{
     clue::Clue
 };
 
-#[allow(dead_code)]
 #[derive(Debug)]
 enum Error {
     NoGame,
@@ -149,9 +148,31 @@ async fn debug_mode(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     Ok(())
 }
 
+#[command]
+#[aliases("start-game")]
+async fn start_game(ctx: &Context, msg: &Message) -> CommandResult {
+    log::info!("Starting game");
+    ctx.data
+        .write()
+        .await
+        .get_mut::<Game>()
+        .map(|g| g.start_game())
+        .ok_or(Error::NoGame)?
+        .map_err(Error::GameError)?;
+    let reply = ctx
+        .data
+        .read()
+        .await
+        .get::<Game>()
+        .map(|g| g.start_game_message())
+        .ok_or(Error::NoGame)?;
+    msg.reply(ctx, reply).await?;
+    Ok(())
+}
+
 #[group]
 #[commands(reset, add_players, status, list_players, add_clue, join,
-           debug_mode)]
+           debug_mode, start_game)]
 struct Yeats;
 
 struct Handler;
