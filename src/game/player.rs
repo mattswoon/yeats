@@ -1,7 +1,6 @@
 use serenity::model::user::User;
-//    *game = Game::new();
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Player {
     pub name: String,
     pub user: User

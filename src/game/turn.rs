@@ -1,18 +1,18 @@
-use tokio::time::{Duration, delay_for};
+use tokio::time::{Duration, sleep};
 use crate::game::{
     game_error::GameError,
     clue::Clue,
     player::Player,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum TurnState {
     Ready,
     Guessing,
     Ended
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Turn {
     performer: Player,
     guesser: Player,
@@ -30,7 +30,7 @@ impl Turn {
 
     pub async fn start(&mut self) {
         self.state = TurnState::Guessing;
-        delay_for(Duration::new(60, 0)).await;
+        sleep(Duration::new(60, 0)).await;
         self.end();
     }
 

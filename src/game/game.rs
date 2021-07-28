@@ -2,7 +2,10 @@ use std::{
     iter::Cycle,
     vec::IntoIter
 };
-use serenity::prelude::TypeMapKey;
+use serenity::{
+    prelude::TypeMapKey,
+    model::user::User,
+};
 use crate::game::{
     game_error::GameError,
     player::Player,
@@ -15,7 +18,8 @@ pub struct Game {
     pub players: Vec<Player>,
     pub bowl: Bowl,
     pub state: GameState,
-    pub turn_queue: Cycle<IntoIter<Turn>>
+    pub admin: Option<User>,
+    pub num_rounds: i64
 }
 
 impl TypeMapKey for Game {
@@ -28,8 +32,13 @@ impl Game {
             players: vec![],
             bowl: Bowl::new(),
             state: GameState::PreGame,
-            turn_queue: vec![].into_iter().cycle()
+            admin: None,
+            num_rounds: 3
         }
+    }
+
+    pub fn set_admin(&mut self, user: User) {
+        self.admin = Some(user);
     }
 
     pub fn add_players(&mut self, p: &mut Vec<Player>) -> Result<(), GameError> {
@@ -42,11 +51,14 @@ impl Game {
         }
     }
 
-    pub fn get_player(&self, name: &str) -> Option<Player> {
-        self.players.iter()
-            .filter(|p| p.name == name)
-            .next()
-            .map(|r| r.clone())
+    pub fn add_player(&mut self, p: Player) -> Result<(), GameError> {
+        match self.state {
+            GameState::PreGame => {
+                (*self).players.push(p);
+                Ok(())
+            },
+            _ => Err(GameError::AlreadyStarted)
+        }
     }
 
     pub fn add_clue(&mut self, c: Clue) -> Result<(), GameError> {
@@ -59,40 +71,42 @@ impl Game {
         }
     }
 
-//    pub fn start_game(self) -> Result<Game, GameError> {
-//        match self.state {
-//            GameState::PreGame => {
-//                let turn_queue = self.players
-//                    .clone()
-//                    .into_iter()
-//                    .cycle()
-//                    .zip(self.players
-//                         .clone()
-//                         .into_iter()
-//                         .cycle()
-//                         .skip(1))
-//                    .map(|(p1, p2)| Turn::new(p1, p2))
-//                    .collect::<Vec<_>>()
-//                    .into_iter()
-//                    .cycle();
-//                let turn = turn_queue.next();
-//                Ok(Game {
-//                    turn_queue: turn_queue,
-//                    state: GameState::Playing,
-//                    ..self })
-//            },
-//            _ => Err(GameError::AlreadyStarted)
-//        }
-//    }
-
-//    pub fn ready_turn(self) -> Result<Game, GameError> {
-//        match self.state {
-//            GameState
-//    }
+    pub fn advance_game(&mut self) -> Result<(), GameError> {
+        match &self.state {
+            GameState::PreGame => {
+                self.state = GameState::Round(
+                    Round {
+                        round_number: 1,
+                        turn_queue: vec![] // initialize the turn queue
+                    }
+                )
+            },
+            GameState::Round(r) => {
+                if r.round_number < self.num_rounds {
+                    self.state = GameState::Round(
+                        Round {
+                            round_number: r.round_number + 1,
+                            turn_queue: vec![] // initialize the turn queue
+                        }
+                    )
+                } else {
+                    self.state = GameState::End
+                }
+            },
+            GameState::End => ()
+        }
+        Ok(())
+    }
 }
 
 pub enum GameState {
     PreGame,
-    Turn(Turn),
-    Playing,
+    Round(Round),
+    End
+}
+
+#[derive(Debug, Clone)]
+pub struct Round {
+    pub round_number: i64,
+    pub turn_queue: Vec<Turn>
 }

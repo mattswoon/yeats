@@ -38,6 +38,13 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 #[command]
+async fn status(ctx: &Context, msg: &Message) -> CommandResult {
+    log::info!("Checking status");
+    msg.reply(ctx, "Status: Ok").await?;
+    Ok(())
+}
+
+#[command]
 async fn reset(ctx: &Context, msg: &Message) -> CommandResult {
     let _game = ctx.data.write()
         .await
@@ -51,16 +58,37 @@ async fn reset(ctx: &Context, msg: &Message) -> CommandResult {
 #[command]
 #[aliases("add-players")]
 async fn add_players(ctx: &Context, msg: &Message) -> CommandResult {
+    msg.react(ctx, '👍').await?;
     let mut players: Vec<Player> = msg.mentions
         .iter()
         .map(|u| u.into())
         .collect();
+    log::info!("Adding players {:?}", &players);
+    let reply = format!("Added players {}", players.iter()
+                        .cloned()
+                        .map(|p| p.name)
+                        .collect::<Vec<_>>()
+                        .join(", "));
     let _game = ctx.data.write()
         .await
         .get_mut::<Game>()
         .map(|g| g.add_players(&mut players))
         .ok_or(Error::NoGame)?;
-    msg.react(ctx, '👍').await?;
+    msg.reply(ctx, reply).await?;
+    Ok(())
+}
+
+#[command]
+async fn join(ctx: &Context, msg: &Message) -> CommandResult {
+    let player: Player = (&msg.author).into();
+    let reply = format!("Added player {} to the game", &player.name);
+    ctx.data.write()
+        .await
+        .get_mut::<Game>()
+        .map(|g| g.add_player(player))
+        .ok_or(Error::NoGame)?
+        .map_err(Error::GameError)?;
+    msg.reply(ctx, reply).await?;
     Ok(())
 }
 
@@ -92,14 +120,38 @@ async fn add_clue(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
             });
         Ok(())
     } else {
-        msg.reply(ctx, format!("Umm... you're supposed to dm that to me")).await?;
+        msg.reply(ctx, "Umm... you're supposed to dm that to me").await?;
         Ok(())
     }
 }
 
+#[command]
+#[aliases("debug-mode")]
+async fn debug_mode(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    if msg.is_private() {
+        if args.rest() == "motherlode" {
+            log::info!("Setting {} as game admin", &msg.author);
+            ctx.data
+                .write()
+                .await
+                .get_mut::<Game>()
+                .map(|g| g.set_admin(msg.author.clone()))
+                .ok_or(Error::NoGame)?;
+            msg.reply(ctx, "Shh, it's our little secret").await?;
+        } else {
+            log::info!("User {} tried to set themselves as admin but got the password wrong", 
+                       &msg.author);
+        }
+    } else {
+        log::info!("User {} tried to set themselves as admin but not in a private channel",
+                   &msg.author);
+    }
+    Ok(())
+}
 
 #[group]
-#[commands(reset, add_players)]
+#[commands(reset, add_players, status, list_players, add_clue, join,
+           debug_mode)]
 struct Yeats;
 
 struct Handler;
@@ -108,6 +160,12 @@ impl EventHandler for Handler {}
 
 #[tokio::main]
 async fn main() {
+    simple_logger::SimpleLogger::new()
+        .with_level(log::LevelFilter::Off)
+        .with_module_level("yeats", log::LevelFilter::Info)
+        .init()
+        .expect("Couldn't init logger");
+
     let token = std::env::var("DISCORD_TOKEN")
         .expect("Coulnd't get discord token");
 
@@ -123,6 +181,7 @@ async fn main() {
         .await
         .expect("client go poo poo");
 
+    log::info!("Starting client...");
     client.start()
         .await
         .expect("client start poo poo bum");
