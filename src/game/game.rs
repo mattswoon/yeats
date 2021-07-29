@@ -10,6 +10,7 @@ use rand::{
 use serenity::{
     prelude::TypeMapKey,
     model::user::User,
+    utils::MessageBuilder,
 };
 use crate::game::{
     game_error::GameError,
@@ -110,6 +111,52 @@ impl Game {
     pub fn start_game_message(&self) -> String {
         "Welcome to the game".to_string()
     }
+
+    pub fn prepare_turn(&mut self) -> Result<(), GameError> {
+        let new_state = match &self.state {
+            GameState::Round(r) => r.clone().prepare_turn().map(GameState::Round),
+            GameState::PreGame => Err(GameError::CantDoThat),
+            GameState::End => Err(GameError::CantDoThat)
+        }?;
+        self.state = new_state;
+        Ok(())
+    }
+
+    pub fn ready_turn_message(&self) -> Result<String, GameError> {
+        match &self.state {
+            GameState::Round(r) => r.ready_turn_message(),
+            GameState::PreGame => Err(GameError::CantDoThat),
+            GameState::End => Err(GameError::CantDoThat),
+        }
+    }
+
+    pub fn start_turn(&mut self) -> Result<Turn, GameError> {
+        let (new_state, turn) = match &self.state {
+            GameState::Round(r) => r.clone()
+                .start_turn()
+                .map(|(new_r, t)| (GameState::Round(new_r), t)),
+            GameState::PreGame => Err(GameError::CantDoThat),
+            GameState::End => Err(GameError::CantDoThat)
+        }?;
+        self.state = new_state;
+        Ok(turn)
+    }
+    
+    pub fn end_turn(&mut self, p: &Player, g: &Player) -> Result<(), GameError> {
+        let new_state = match &self.state {
+            GameState::Round(r) => r.clone().end_turn(p, g).map(GameState::Round),
+            GameState::PreGame => Err(GameError::CantDoThat),
+            GameState::End => Err(GameError::CantDoThat)
+        }?;
+        self.state = new_state;
+        Ok(())
+    }
+
+    pub async fn run_turn(&mut self) -> Result<(), GameError> {
+        let Turn { performer, guesser, state: _} = self.start_turn()?;
+        sleep(Duration::from_secs(60)).await;
+        self.end_turn(&performer, &guesser)
+    }
 }
 
 pub enum GameState {
@@ -131,25 +178,33 @@ impl Round {
         let mut rng = thread_rng();
         players.shuffle(&mut rng);
         let turn_queue = players.iter()
-            .zip(players.iter().cycle())
+            .zip(players.iter().skip(1).cycle())
             .map(|(p1, p2)| Turn::new(p1.clone(), p2.clone()))
             .collect();
         Round { round_number, turn_queue, current_turn: None }
     }
 
-    pub fn prepare_turn(&mut self) -> Result<(), GameError> {
-        match &self.current_turn {
+    pub fn prepare_turn(self) -> Result<Round, GameError> {
+        match self.current_turn {
             None => {
-                let turn = self.turn_queue.pop();
-                self.current_turn = turn;
-                Ok(())
+                let mut turn_queue = self.turn_queue;
+                let current_turn = turn_queue.pop();
+                Ok(Round { 
+                    round_number: self.round_number,
+                    turn_queue,
+                    current_turn
+                })
             },
             Some(Turn { performer, guesser, state: TurnState::Ended }) => {
                 let ended_turn = Turn::new(performer.clone(), guesser.clone());
-                self.turn_queue.insert(0, ended_turn);
-                let turn = self.turn_queue.pop();
-                self.current_turn = turn;
-                Ok(())
+                let mut turn_queue = self.turn_queue;
+                turn_queue.insert(0, ended_turn);
+                let current_turn = turn_queue.pop();
+                Ok(Round {
+                    round_number: self.round_number,
+                    turn_queue,
+                    current_turn
+                })
             },
             Some(t) => {
                 Err(GameError::BadTurnState(t.clone()))
@@ -157,40 +212,59 @@ impl Round {
         }
     }
 
-    pub async fn start_turn(&mut self) -> Result<(), GameError> {
+    pub fn ready_turn_message(&self) -> Result<String, GameError> {
         match &self.current_turn {
             Some(t) => match t.state {
-                TurnState::Ready => {
-                    let p = t.performer.clone();
-                    let g = t.guesser.clone();
-                    self.current_turn = self.current_turn.as_ref().map(Turn::as_guessing);
-                    sleep(Duration::new(60, 0)).await;
-                    self.end_turn(&p, &g)?;
-                    Ok(())
-                },
-                _ => Err(GameError::BadTurnState(t.clone())),
-            }
+                TurnState::Ready => Ok(
+                    MessageBuilder::new()
+                        .push("Get ready ")
+                        .mention(&t.performer.user)
+                        .push(", you'll be performing for ")
+                        .mention(&t.guesser.user)
+                        .push("!!")
+                        .build()
+                ),
+                TurnState::Guessing => Err(GameError::BadTurnState(t.clone())),
+                TurnState::Ended => Err(GameError::BadTurnState(t.clone())),
+            },
             None => Err(GameError::NoTurnsQueued)
         }
     }
 
-    pub fn end_turn(&mut self, p: &Player, g: &Player) -> Result<(), GameError> {
-        match &self.current_turn {
-            Some(Turn { performer, guesser, state }) => {
-                if (performer == p) & (guesser == g) {
-                    self.current_turn = self.current_turn
-                        .as_ref()
-                        .map(Turn::as_ended);
-                    Ok(())
+    pub fn start_turn(self) -> Result<(Round, Turn), GameError> {
+        match self.current_turn {
+            Some(t) => match t.state {
+                TurnState::Ready => Ok((Round {
+                    round_number: self.round_number,
+                    turn_queue: self.turn_queue,
+                    current_turn: Some(t.clone().as_guessing())
+                }, t.as_guessing())),
+                TurnState::Guessing => Err(GameError::BadTurnState(t)),
+                TurnState::Ended => Err(GameError::BadTurnState(t)),
+            },
+            None => Err(GameError::NoTurnsQueued),
+        }
+    }
+
+    pub fn end_turn(self, p: &Player, g: &Player) -> Result<Round, GameError> {
+        match self.current_turn {
+            Some(t) => {
+                if (p == &t.performer) & (g == &t.guesser) {
+                    match t.state {
+                        TurnState::Guessing => Ok(Round {
+                            round_number: self.round_number,
+                            turn_queue: self.turn_queue,
+                            current_turn: Some(t.as_ended())
+                        }),
+                        TurnState::Ready => Err(GameError::BadTurnState(t)),
+                        TurnState::Ended => Err(GameError::BadTurnState(t))
+                    }
                 } else {
                     Err(GameError::TurnDoesntMatchPlayers {
-                        turn: Turn { 
-                            performer: performer.clone(), 
-                            guesser: guesser.clone(), 
-                            state: state.clone() 
-                        },
+                        turn: t,
                         performer: p.clone(),
-                        guesser: g.clone() })
+                        guesser: g.clone()
+                    })
                 }
             },
             None => Err(GameError::NoTurnsQueued)

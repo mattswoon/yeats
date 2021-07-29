@@ -170,6 +170,27 @@ async fn start_game(ctx: &Context, msg: &Message) -> CommandResult {
     Ok(())
 }
 
+#[command]
+#[aliases("next-turn")]
+async fn next_turn(ctx: &Context, msg: &Message) -> CommandResult {
+    ctx.data
+        .write()
+        .await
+        .get_mut::<Game>()
+        .map(Game::prepare_turn)
+        .ok_or(Error::NoGame)?
+        .map_err(Error::GameError)?;
+    let reply = ctx.data
+        .read()
+        .await
+        .get::<Game>()
+        .map(Game::ready_turn_message)
+        .ok_or(Error::NoGame)?
+        .map_err(Error::GameError)?;
+    msg.reply(ctx, reply).await?;
+    Ok(())
+}
+
 #[group]
 #[commands(reset, add_players, status, list_players, add_clue, join,
            debug_mode, start_game)]

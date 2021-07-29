@@ -1,4 +1,3 @@
-use tokio::time::{Duration, sleep};
 use crate::game::{
     game_error::GameError,
     clue::Clue,
@@ -28,18 +27,18 @@ impl Turn {
         }
     }
 
-    pub fn as_guessing(&self) -> Turn {
+    pub fn as_guessing(self) -> Turn {
         Turn {
-            performer: self.performer.clone(),
-            guesser: self.guesser.clone(),
+            performer: self.performer,
+            guesser: self.guesser,
             state: TurnState::Guessing
         }
     }
 
-    pub fn as_ended(&self) -> Turn {
+    pub fn as_ended(self) -> Turn {
         Turn {
-            performer: self.performer.clone(),
-            guesser: self.guesser.clone(),
+            performer: self.performer,
+            guesser: self.guesser,
             state: TurnState::Ended
         }
     }
