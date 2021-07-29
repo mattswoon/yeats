@@ -14,9 +14,9 @@ pub enum TurnState {
 
 #[derive(Clone, Debug)]
 pub struct Turn {
-    performer: Player,
-    guesser: Player,
-    state: TurnState
+    pub performer: Player,
+    pub guesser: Player,
+    pub state: TurnState
 }
 
 impl Turn {
@@ -28,13 +28,19 @@ impl Turn {
         }
     }
 
-    pub async fn start(&mut self) {
-        self.state = TurnState::Guessing;
-        sleep(Duration::new(60, 0)).await;
-        self.end();
+    pub fn as_guessing(&self) -> Turn {
+        Turn {
+            performer: self.performer.clone(),
+            guesser: self.guesser.clone(),
+            state: TurnState::Guessing
+        }
     }
 
-    pub fn end(&mut self) {
-        self.state = TurnState::Ended;
+    pub fn as_ended(&self) -> Turn {
+        Turn {
+            performer: self.performer.clone(),
+            guesser: self.guesser.clone(),
+            state: TurnState::Ended
+        }
     }
 }

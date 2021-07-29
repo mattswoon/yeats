@@ -1,8 +1,15 @@
+use crate::game::{
+    turn::Turn,
+    player::Player,
+};
 
 #[derive(Debug)]
 pub enum GameError {
     CantDoThat,
-    AlreadyStarted
+    AlreadyStarted,
+    BadTurnState(Turn),
+    NoTurnsQueued,
+    TurnDoesntMatchPlayers { turn: Turn, performer: Player, guesser: Player },
 }
 
 impl std::fmt::Display for GameError {

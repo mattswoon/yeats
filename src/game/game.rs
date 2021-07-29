@@ -2,6 +2,7 @@ use std::{
     iter::Cycle,
     vec::IntoIter
 };
+use tokio::time::{Duration, sleep};
 use rand::{
     thread_rng,
     seq::SliceRandom,
@@ -79,19 +80,13 @@ impl Game {
         match &self.state {
             GameState::PreGame => {
                 self.state = GameState::Round(
-                    Round {
-                        round_number: 1,
-                        turn_queue: vec![] // initialize the turn queue
-                    }
+                    Round::new(1, &self.players)
                 )
             },
             GameState::Round(r) => {
                 if r.round_number < self.num_rounds {
                     self.state = GameState::Round(
-                        Round {
-                            round_number: r.round_number + 1,
-                            turn_queue: vec![] // initialize the turn queue
-                        }
+                        Round::new(r.round_number + 1, &self.players)
                     )
                 } else {
                     self.state = GameState::End
@@ -126,7 +121,8 @@ pub enum GameState {
 #[derive(Debug, Clone)]
 pub struct Round {
     pub round_number: i64,
-    pub turn_queue: Vec<Turn>
+    pub turn_queue: Vec<Turn>,
+    pub current_turn: Option<Turn>
 }
 
 impl Round {
@@ -138,6 +134,66 @@ impl Round {
             .zip(players.iter().cycle())
             .map(|(p1, p2)| Turn::new(p1.clone(), p2.clone()))
             .collect();
-        Round { round_number, turn_queue }
+        Round { round_number, turn_queue, current_turn: None }
+    }
+
+    pub fn prepare_turn(&mut self) -> Result<(), GameError> {
+        match &self.current_turn {
+            None => {
+                let turn = self.turn_queue.pop();
+                self.current_turn = turn;
+                Ok(())
+            },
+            Some(Turn { performer, guesser, state: TurnState::Ended }) => {
+                let ended_turn = Turn::new(performer.clone(), guesser.clone());
+                self.turn_queue.insert(0, ended_turn);
+                let turn = self.turn_queue.pop();
+                self.current_turn = turn;
+                Ok(())
+            },
+            Some(t) => {
+                Err(GameError::BadTurnState(t.clone()))
+            }
+        }
+    }
+
+    pub async fn start_turn(&mut self) -> Result<(), GameError> {
+        match &self.current_turn {
+            Some(t) => match t.state {
+                TurnState::Ready => {
+                    let p = t.performer.clone();
+                    let g = t.guesser.clone();
+                    self.current_turn = self.current_turn.as_ref().map(Turn::as_guessing);
+                    sleep(Duration::new(60, 0)).await;
+                    self.end_turn(&p, &g)?;
+                    Ok(())
+                },
+                _ => Err(GameError::BadTurnState(t.clone())),
+            }
+            None => Err(GameError::NoTurnsQueued)
+        }
+    }
+
+    pub fn end_turn(&mut self, p: &Player, g: &Player) -> Result<(), GameError> {
+        match &self.current_turn {
+            Some(Turn { performer, guesser, state }) => {
+                if (performer == p) & (guesser == g) {
+                    self.current_turn = self.current_turn
+                        .as_ref()
+                        .map(Turn::as_ended);
+                    Ok(())
+                } else {
+                    Err(GameError::TurnDoesntMatchPlayers {
+                        turn: Turn { 
+                            performer: performer.clone(), 
+                            guesser: guesser.clone(), 
+                            state: state.clone() 
+                        },
+                        performer: p.clone(),
+                        guesser: g.clone() })
+                }
+            },
+            None => Err(GameError::NoTurnsQueued)
+        }
     }
 }
