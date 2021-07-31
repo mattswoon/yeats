@@ -152,10 +152,24 @@ impl Game {
         Ok(())
     }
 
-    pub async fn run_turn(&mut self) -> Result<(), GameError> {
-        let Turn { performer, guesser, state: _} = self.start_turn()?;
-        sleep(Duration::from_secs(60)).await;
-        self.end_turn(&performer, &guesser)
+    pub fn draw_clue(&mut self) -> Result<DrawClue, GameError> {
+        match &self.state {
+            GameState::Round(round) => {
+                match &round.current_turn {
+                    Some(Turn { performer, guesser, state: _}) => {
+                        let clue = self.bowl.draw_clue();
+                        Ok(DrawClue { 
+                            performer: performer.clone(), 
+                            guesser: guesser.clone(), 
+                            clue
+                        })
+                    },
+                    None => Err(GameError::CantDoThat),
+                }
+            },
+            GameState::PreGame => Err(GameError::CantDoThat),
+            GameState::End => Err(GameError::CantDoThat),
+        }
     }
 }
 
@@ -163,6 +177,13 @@ pub enum GameState {
     PreGame,
     Round(Round),
     End
+}
+
+#[derive(Debug, Clone)]
+pub struct DrawClue {
+    clue: Option<Clue>,
+    performer: Player,
+    guesser: Player,
 }
 
 #[derive(Debug, Clone)]
