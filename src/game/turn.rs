@@ -42,4 +42,21 @@ impl Turn {
             state: TurnState::Ended
         }
     }
+
+    pub fn status(&self) -> String {
+        match self.state {
+            TurnState::Ready => 
+                format!("{} is getting ready to perform to {} who will be guessing", 
+                        &self.performer, 
+                        &self.guesser),
+            TurnState::Guessing =>
+                format!("{} is performing for {} who is guessing",
+                        &self.performer,
+                        &self.guesser),
+            TurnState::Ended =>
+                format!("{} has finished performing for {} who was guessing",
+                        &self.performer,
+                        &self.guesser)
+        }
+    }
 }

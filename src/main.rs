@@ -10,7 +10,6 @@ use serenity::{
         macros::{command, group},
     },
 };
-//use log::warn;
 use itertools::Itertools;
 use yeats::game::{
     game::Game,
@@ -23,7 +22,8 @@ use yeats::game::{
 #[derive(Debug)]
 enum Error {
     NoGame,
-    GameError(GameError)
+    GameError(GameError),
+    Serenity(serenity::prelude::SerenityError)
 }
 
 impl std::fmt::Display for Error {
@@ -32,29 +32,128 @@ impl std::fmt::Display for Error {
             Error::NoGame => 
                 write!(f, "No Game object in context"),
             Error::GameError(ge) => write!(f, "{}", ge),
+            Error::Serenity(e) => write!(f, "{}", e),
         }
     }
 }
 
 impl std::error::Error for Error {}
 
-#[command]
-async fn status(ctx: &Context, msg: &Message) -> CommandResult {
-    log::info!("Checking status");
-    msg.reply(ctx, "Status: Ok").await?;
+
+enum Response {
+    Reply(String),
+    ThumbsUp,
+}
+
+struct ValuedResponse<T> {
+    response: Option<Response>,
+    value: T
+}
+
+impl<T> ValuedResponse<T> {
+    fn from(value: T) -> Self {
+        ValuedResponse { response: None, value }
+    }
+
+    fn with_reply(self, reply: String) -> Self {
+        ValuedResponse {
+            response: Some(Response::Reply(reply)),
+            value: self.value
+        }
+    }
+
+    fn with_thumbsup(self) -> Self {
+        ValuedResponse {
+            response: Some(Response::ThumbsUp),
+            value: self.value
+        }
+    }
+}
+
+async fn respond_and_return<T>(ctx: &Context, msg: &Message, result: Result<ValuedResponse<T>, Error>) -> Result<T, Error> {
+    match result {
+        Ok(ValuedResponse { response: Some(Response::Reply(reply)), value }) => 
+            msg.reply(ctx, reply)
+                .await
+                .map(|_| value)
+                .map_err(Error::Serenity),
+        Ok(ValuedResponse { response: Some(Response::ThumbsUp), value }) =>
+            msg.react(ctx, '👍')
+                .await
+                .map(|_| value)
+                .map_err(Error::Serenity),
+        Ok(ValuedResponse { response: None, value }) => Ok(value),
+        Err(Error::NoGame) => {
+            log::warn!("No game data");
+            msg.react(ctx, '❗').await.map_err(Error::Serenity)?;
+            msg.reply(ctx, "Things have gone very bad, ask Tom").await.map_err(Error::Serenity)?;
+            Err(Error::NoGame)
+        },
+        Err(Error::GameError(e)) => {
+            log::info!("GameError: {}", &e);
+            msg.react(ctx, '🚫').await.map_err(Error::Serenity)?;
+            msg.reply(ctx, &e).await.map_err(Error::Serenity)?;
+            Err(Error::GameError(e))
+        },
+        Err(Error::Serenity(e)) => {
+            log::warn!("{}", &e);
+            msg.react(ctx, '❗').await.map_err(Error::Serenity)?;
+            msg.reply(ctx, "Things have gone very bad, ask Tom").await.map_err(Error::Serenity)?;
+            Err(Error::Serenity(e))
+        }
+    }
+}
+
+async fn respond(ctx: &Context, msg: &Message, result: Result<Option<String>, Error>) -> CommandResult {
+    match result {
+        Ok(Some(s)) => { msg.reply(ctx, s).await?; },
+        Err(e) => match e {
+            Error::NoGame => {
+                log::warn!("No game data");
+                msg.react(ctx, '❗').await?;
+                msg.reply(ctx, "Things have gone very bad, ask Tom").await?;
+            },
+            Error::GameError(ge) => {
+                log::info!("GameError: {}", ge);
+                msg.react(ctx, '🚫').await?;
+                msg.reply(ctx, ge).await?;
+            }
+            Error::Serenity(se) => {
+                log::warn!("{}", &se);
+                msg.react(ctx, '❗').await.map_err(Error::Serenity)?;
+                msg.reply(ctx, "Things have gone very bad, ask Tom").await?;
+            }
+        },
+        Ok(None) => { msg.react(ctx, '👍').await?; }
+    };
     Ok(())
 }
 
 #[command]
+async fn status(ctx: &Context, msg: &Message) -> CommandResult {
+    log::info!("{} is checking status", msg.author.name);
+    respond(
+        ctx, 
+        msg,
+        ctx.data
+            .read()
+            .await
+            .get::<Game>()
+            .ok_or(Error::NoGame)
+            .map(Game::status)).await
+}
+
+#[command]
 async fn reset(ctx: &Context, msg: &Message) -> CommandResult {
-    log::info!("Resetting game");
-    ctx.data.write()
-        .await
-        .get_mut::<Game>()
-        .map(|g| *g = Game::new())
-        .ok_or(Error::NoGame)?;
-    msg.react(ctx, '👍').await?;
-    Ok(())
+    log::info!("{} is resetting the game", msg.author.name);
+    respond(
+        ctx,
+        msg,
+        ctx.data.write()
+            .await
+            .get_mut::<Game>()
+            .ok_or(Error::NoGame)
+            .map(Game::reset)).await
 }
 
 #[command]
@@ -64,70 +163,64 @@ async fn add_players(ctx: &Context, msg: &Message) -> CommandResult {
         .iter()
         .map(|u| u.into())
         .collect();
-    log::info!("Adding players {}", &players.iter().join(", "));
-    let reply = format!("Added players {}", players.iter()
-                        .cloned()
-                        .map(|p| p.name)
-                        .collect::<Vec<_>>()
-                        .join(", "));
-    ctx.data.write()
-        .await
-        .get_mut::<Game>()
-        .map(|g| g.add_players(&mut players))
-        .ok_or(Error::NoGame)?
-        .map_err(Error::GameError)?;
-    msg.reply(ctx, reply).await?;
-    Ok(())
+    log::info!("{} is adding players {}", msg.author.name, &players.iter().join(", "));
+    respond(
+        ctx,
+        msg,
+        ctx.data.write()
+            .await
+            .get_mut::<Game>()
+            .ok_or(Error::NoGame)
+            .and_then(|g| g.add_players(&mut players).map_err(Error::GameError))).await
 }
 
 #[command]
 async fn join(ctx: &Context, msg: &Message) -> CommandResult {
+    log::info!("{} is joining the game", msg.author.name);
     let player: Player = (&msg.author).into();
-    log::info!("Adding player {} to the game", player);
-    let reply = format!("Added player {} to the game", &player.name);
-    ctx.data.write()
-        .await
-        .get_mut::<Game>()
-        .map(|g| g.add_player(player))
-        .ok_or(Error::NoGame)?
-        .map_err(Error::GameError)?;
-    msg.reply(ctx, reply).await?;
-    Ok(())
+    respond(
+        ctx,
+        msg,
+        ctx.data.write()
+            .await
+            .get_mut::<Game>()
+            .ok_or(Error::NoGame)
+            .and_then(|g| g.add_player(player).map_err(Error::GameError))).await
 }
 
 #[command]
 #[aliases("list-players")]
 async fn list_players(ctx: &Context, msg: &Message) -> CommandResult {
-    log::info!("Listing players");
-    let reply = ctx.data.read()
-        .await
-        .get::<Game>()
-        .map(|g| g.players.iter().map(|p| p.name.clone()).join(", "))
-        .ok_or(Error::NoGame)?;
-    log::info!("{}", &reply);
-    msg.reply(ctx, format!("Players in game: {}", reply)).await?;
-    Ok(())
+    log::info!("{} is listing players", msg.author.name);
+    respond(
+        ctx,
+        msg,
+        ctx.data.read()
+            .await
+            .get::<Game>()
+            .ok_or(Error::NoGame)
+            .map(Game::list_players)).await
 }
 
 #[command]
 #[aliases("add-clue")]
 async fn add_clue(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     if msg.is_private() {
-        let clue_text = args.rest();
-        let player: Player = (&msg.author).into();
-        log::info!("Adding clue from {}", player);
-        ctx.data.write()
-            .await
-            .get_mut::<Game>()
-            .map(|g| {
-                g.add_clue(Clue { entered_by: player,
-                                  text: clue_text.into() })
-            });
-        msg.react(ctx, '👍').await?;
-        Ok(())
+        let text = args.rest().into();
+        let entered_by: Player = (&msg.author).into();
+        log::info!("Adding clue from {}", &entered_by);
+        respond(
+            ctx,
+            msg,
+            ctx.data
+                .write()
+                .await
+                .get_mut::<Game>()
+                .ok_or(Error::NoGame)
+                .and_then(|g| g.add_clue(Clue { entered_by, text })
+                          .map_err(Error::GameError))).await
     } else {
-        msg.reply(ctx, "Umm... you're supposed to dm that to me").await?;
-        Ok(())
+        respond(ctx, msg, Ok(Some("Umm... you're supposed to dm that to me".to_string()))).await
     }
 }
 
@@ -159,57 +252,53 @@ async fn debug_mode(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 #[aliases("start-game")]
 async fn start_game(ctx: &Context, msg: &Message) -> CommandResult {
     log::info!("Starting game");
-    ctx.data
-        .write()
-        .await
-        .get_mut::<Game>()
-        .map(|g| g.start_game())
-        .ok_or(Error::NoGame)?
-        .map_err(Error::GameError)?;
-    let reply = ctx
-        .data
-        .read()
-        .await
-        .get::<Game>()
-        .map(|g| g.start_game_message())
-        .ok_or(Error::NoGame)?;
-    msg.reply(ctx, reply).await?;
-    Ok(())
+    respond(
+        ctx,
+        msg,
+        ctx.data
+            .write()
+            .await
+            .get_mut::<Game>()
+            .ok_or(Error::NoGame)
+            .and_then(|g| g.start_game().map_err(Error::GameError))).await
 }
 
 #[command]
 #[aliases("next-turn")]
 async fn next_turn(ctx: &Context, msg: &Message) -> CommandResult {
-    ctx.data
-        .write()
-        .await
-        .get_mut::<Game>()
-        .map(Game::prepare_turn)
-        .ok_or(Error::NoGame)?
-        .map_err(Error::GameError)?;
-    let reply = ctx.data
-        .read()
-        .await
-        .get::<Game>()
-        .map(Game::ready_turn_message)
-        .ok_or(Error::NoGame)?
-        .map_err(Error::GameError)?;
-    msg.reply(ctx, reply).await?;
-    Ok(())
+    log::info!("Queueing next turn");
+    respond(
+        ctx,
+        msg,
+        ctx.data
+            .write()
+            .await
+            .get_mut::<Game>()
+            .ok_or(Error::NoGame)
+            .and_then(|g| g.prepare_turn().map_err(Error::GameError))).await
 }
 
 #[command]
 #[aliases("start-turn")]
 async fn start_turn(ctx: &Context, msg: &Message) -> CommandResult {
-    msg.react(ctx, '👍').await?;
-    let Turn { performer, guesser, state: _ } = ctx.data
-        .write()
-        .await
-        .get_mut::<Game>()
-        .map(Game::start_turn)
-        .ok_or(Error::NoGame)?
-        .map_err(Error::GameError)?;
+    log::info!("Starting turn");
+    let Turn { performer, guesser, state: _ } = 
+        respond_and_return(
+            ctx,
+            msg,
+            ctx.data
+                .write()
+                .await
+                .get_mut::<Game>()
+                .ok_or(Error::NoGame)
+                .and_then(|g| g.start_turn().map_err(Error::GameError))
+                .map(|t| ValuedResponse::from(t.clone())
+                     .with_reply(format!("GO! {} you've got 60 seconds to perform as many clues as possible to {}", 
+                                         &t.performer,
+                                         &t.guesser)))).await?;
+    log::info!("Starting timer for {} -> {}", &performer, &guesser);
     sleep(Duration::from_secs(60)).await;
+    log::info!("Ending turn {} -> {}", &performer, &guesser);
     ctx.data
         .write()
         .await
@@ -219,6 +308,7 @@ async fn start_turn(ctx: &Context, msg: &Message) -> CommandResult {
         .map_err(Error::GameError)?;
     Ok(())
 }
+
 
 #[group]
 #[commands(reset, add_players, status, list_players, add_clue, join,

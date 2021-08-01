@@ -2,7 +2,6 @@ use std::{
     iter::Cycle,
     vec::IntoIter
 };
-use tokio::time::{Duration, sleep};
 use rand::{
     thread_rng,
     seq::SliceRandom,
@@ -43,35 +42,80 @@ impl Game {
         }
     }
 
+    pub fn reset(&mut self) -> Option<String> {
+        *self = Game::new();
+        None
+    }
+
+    pub fn status(&self) -> Option<String> {
+        match &self.state {
+            GameState::PreGame => {
+                Some(format!("Game is yet to start, feel free to join or add more clues.\n\tPlayers:\t{}\n\tClues added:\t{}", 
+                        self.players
+                            .iter()
+                            .map(|p| p.name.clone())
+                            .collect::<Vec<_>>()
+                            .join("\n\t\t"), 
+                        self.bowl.status()))
+            },
+            GameState::Round(round) => {
+                let turn_status = round.current_turn
+                    .as_ref()
+                    .map(Turn::status)
+                    .unwrap_or("".to_string());
+                Some(format!("We're currently playing round {}. {}", 
+                        &round.round_number, 
+                        turn_status)
+                    .trim()
+                    .to_string())
+            },
+            _ => Some(format!("I dunno??")),
+        }
+    }
+
     pub fn set_admin(&mut self, user: User) {
         self.admin = Some(user);
     }
 
-    pub fn add_players(&mut self, p: &mut Vec<Player>) -> Result<(), GameError> {
+    pub fn add_players(&mut self, p: &mut Vec<Player>) -> Result<Option<String>, GameError> {
         match self.state {
             GameState::PreGame => {
+                let reply = format!("Added players {}", p.iter()
+                                    .cloned()
+                                    .map(|p| p.name)
+                                    .collect::<Vec<_>>()
+                                    .join(", "));
                 (*self).players.append(p);
-                Ok(())
+                Ok(Some(reply))
             },
             _ => Err(GameError::AlreadyStarted)
         }
     }
 
-    pub fn add_player(&mut self, p: Player) -> Result<(), GameError> {
+    pub fn add_player(&mut self, p: Player) -> Result<Option<String>, GameError> {
         match self.state {
             GameState::PreGame => {
+                let reply = format!("{} joined the game", &p.name);
                 (*self).players.push(p);
-                Ok(())
+                Ok(Some(reply))
             },
             _ => Err(GameError::AlreadyStarted)
         }
     }
 
-    pub fn add_clue(&mut self, c: Clue) -> Result<(), GameError> {
+    pub fn list_players(&self) -> Option<String> {
+        Some(self.players
+             .iter()
+             .map(|p| p.name.clone())
+             .collect::<Vec<_>>()
+             .join("\n"))
+    }
+
+    pub fn add_clue(&mut self, c: Clue) -> Result<Option<String>, GameError> {
         match self.state {
             GameState::PreGame => {
                 self.bowl.add_clue(c);
-                Ok(())
+                Ok(None)
             },
             _ => Err(GameError::AlreadyStarted)
         }
@@ -98,28 +142,23 @@ impl Game {
         Ok(())
     }
 
-    pub fn start_game(&mut self) -> Result<(), GameError> {
+    pub fn start_game(&mut self) -> Result<Option<String>, GameError> {
         match &self.state {
             GameState::PreGame => {
                 self.state = GameState::Round(Round::new(1, &self.players));
-                Ok(())
+                Ok(Some("Welcome to the game".to_string()))
             },
             _ => Err(GameError::AlreadyStarted)
         }
     }
 
-    pub fn start_game_message(&self) -> String {
-        "Welcome to the game".to_string()
-    }
-
-    pub fn prepare_turn(&mut self) -> Result<(), GameError> {
-        let new_state = match &self.state {
+    pub fn prepare_turn(&mut self) -> Result<Option<String>, GameError> {
+        match &self.state {
             GameState::Round(r) => r.clone().prepare_turn().map(GameState::Round),
             GameState::PreGame => Err(GameError::CantDoThat),
             GameState::End => Err(GameError::CantDoThat)
-        }?;
-        self.state = new_state;
-        Ok(())
+        }.map(|new_state| self.state = new_state)
+        .and_then(|_| self.ready_turn_message().map(Some))
     }
 
     pub fn ready_turn_message(&self) -> Result<String, GameError> {
