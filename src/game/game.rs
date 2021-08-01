@@ -191,19 +191,39 @@ impl Game {
         Ok(())
     }
 
-    pub fn draw_clue(&mut self) -> Result<DrawClue, GameError> {
+    pub fn current_performer(&self) -> Option<Player> {
+        match &self.state {
+            GameState::Round(Round { 
+                round_number: _,
+                turn_queue: _,
+                current_turn: Some(Turn { performer, guesser: _, state: _})
+            }) => Some(performer.clone()),
+            _ => None
+        }
+    }
+
+    pub fn draw_clue(&mut self, by: &Player) -> Result<Option<Clue>, GameError> {
         match &self.state {
             GameState::Round(round) => {
                 match &round.current_turn {
-                    Some(Turn { performer, guesser, state: _}) => {
-                        let clue = self.bowl.draw_clue();
-                        Ok(DrawClue { 
+                    Some(Turn { performer, state: TurnState::Guessing, .. }) =>
+                        if performer == by {
+                            let clue = self.bowl.draw_clue();
+                            Ok(clue)
+                        } else {
+                            Err(GameError::PlayerNotAllowedToDrawAClue(performer.clone()))
+                        },
+                    Some(Turn { performer, guesser, state: TurnState::Ready }) => 
+                        Err(GameError::BadTurnState(Turn { 
                             performer: performer.clone(), 
                             guesser: guesser.clone(), 
-                            clue
-                        })
-                    },
-                    None => Err(GameError::CantDoThat),
+                            state: TurnState::Ready})),
+                    Some(Turn { performer, guesser, state: TurnState::Ended }) => 
+                        Err(GameError::BadTurnState(Turn { 
+                            performer: performer.clone(), 
+                            guesser: guesser.clone(), 
+                            state: TurnState::Ended})),
+                    None => Err(GameError::NoTurnsQueued),
                 }
             },
             GameState::PreGame => Err(GameError::CantDoThat),

@@ -129,6 +129,31 @@ async fn respond(ctx: &Context, msg: &Message, result: Result<Option<String>, Er
     Ok(())
 }
 
+async fn respond_directly(ctx: &Context, msg: &Message, result: Result<Option<String>, Error>) -> CommandResult {
+    match result {
+        Ok(Some(s)) => {msg.author.dm(ctx, |m| m.content(s)).await?; ()},
+        Err(e) => match e {
+            Error::NoGame => {
+                log::warn!("No game data");
+                msg.react(ctx, '❗').await?;
+                msg.reply(ctx, "Things have gone very bad, ask Tom").await?;
+            },
+            Error::GameError(ge) => {
+                log::info!("GameError: {}", ge);
+                msg.react(ctx, '🚫').await?;
+                msg.reply(ctx, ge).await?;
+            }
+            Error::Serenity(se) => {
+                log::warn!("{}", &se);
+                msg.react(ctx, '❗').await.map_err(Error::Serenity)?;
+                msg.reply(ctx, "Things have gone very bad, ask Tom").await?;
+            }
+        },
+        Ok(None) => {msg.react(ctx, '👍').await?; ()}
+    }
+    Ok(())
+}
+
 #[command]
 async fn status(ctx: &Context, msg: &Message) -> CommandResult {
     log::info!("{} is checking status", msg.author.name);
@@ -309,6 +334,21 @@ async fn start_turn(ctx: &Context, msg: &Message) -> CommandResult {
     Ok(())
 }
 
+#[command]
+#[aliases("next-clue", "y", "Y")]
+async fn next_clue(ctx: &Context, msg: &Message) -> CommandResult {
+    let by = (&msg.author).into();
+    respond_directly(
+        ctx,
+        msg,
+        ctx.data
+            .write()
+            .await
+            .get_mut::<Game>()
+            .ok_or(Error::NoGame)
+            .and_then(|g| g.draw_clue(&by).map_err(Error::GameError))
+            .map(|oc| oc.map(|c| c.text))).await
+}
 
 #[group]
 #[commands(reset, add_players, status, list_players, add_clue, join,

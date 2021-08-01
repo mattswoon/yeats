@@ -9,14 +9,16 @@ use crate::game::{
 
 pub struct Bowl {
     unsolved: Vec<Clue>,
-    solved: Vec<Clue>
+    solved: Vec<Clue>,
+    showing: Option<Clue>,
 }
 
 impl Bowl {
     pub fn new() -> Bowl {
         Bowl {
             unsolved: vec![],
-            solved: vec![]
+            solved: vec![],
+            showing: None,
         }
     }
 
@@ -30,16 +32,24 @@ impl Bowl {
     }
 
     pub fn draw_clue(&mut self) -> Option<Clue> {
-        self.unsolved.pop()
+        let clue = self.unsolved.pop();
+        self.showing = clue.clone();
+        clue
     }
 
-    pub fn put_back(&mut self, c: Clue) {
-        self.unsolved.push(c);
-        self.shuffle();
+    pub fn put_back(&mut self) {
+        if let Some(c) = &self.showing {
+            self.unsolved.push(c.clone());
+            self.showing = None;
+            self.shuffle();
+        }
     }
 
-    pub fn mark_solved(&mut self, c: Clue) {
-        self.solved.push(c);
+    pub fn solve_showing_clue(&mut self) {
+        if let Some(c) = &self.showing {
+            self.solved.push(c.clone());
+            self.showing = None;
+        }
     }
 
     pub fn status(&self) -> String {
