@@ -8,7 +8,10 @@ use rand::{
 };
 use serenity::{
     prelude::TypeMapKey,
-    model::user::User,
+    model::{
+        user::User,
+        channel::GuildChannel,
+    },
     utils::MessageBuilder,
 };
 use crate::game::{
@@ -24,7 +27,8 @@ pub struct Game {
     pub bowl: Bowl,
     pub state: GameState,
     pub admin: Option<User>,
-    pub num_rounds: i64
+    pub num_rounds: i64,
+    pub main_channel: Option<GuildChannel>
 }
 
 impl TypeMapKey for Game {
@@ -38,7 +42,8 @@ impl Game {
             bowl: Bowl::new(),
             state: GameState::PreGame,
             admin: None,
-            num_rounds: 3
+            num_rounds: 3,
+            main_channel: None
         }
     }
 
@@ -142,10 +147,11 @@ impl Game {
         Ok(())
     }
 
-    pub fn start_game(&mut self) -> Result<Option<String>, GameError> {
+    pub fn start_game(&mut self, channel: GuildChannel) -> Result<Option<String>, GameError> {
         match &self.state {
             GameState::PreGame => {
                 self.state = GameState::Round(Round::new(1, &self.players));
+                self.main_channel = Some(channel);
                 Ok(Some("Welcome to the game".to_string()))
             },
             _ => Err(GameError::AlreadyStarted)
@@ -202,14 +208,18 @@ impl Game {
         }
     }
 
-    pub fn draw_clue(&mut self, by: &Player) -> Result<Option<Clue>, GameError> {
+    pub fn draw_clue(&mut self, by: &Player) -> Result<DrawClue, GameError> {
         match &self.state {
             GameState::Round(round) => {
                 match &round.current_turn {
-                    Some(Turn { performer, state: TurnState::Guessing, .. }) =>
+                    Some(Turn { performer, guesser, state: TurnState::Guessing }) =>
                         if performer == by {
                             let clue = self.bowl.draw_clue();
-                            Ok(clue)
+                            Ok(DrawClue {
+                                clue: clue,
+                                performer: performer.clone(),
+                                guesser: guesser.clone(),
+                            })
                         } else {
                             Err(GameError::PlayerNotAllowedToDrawAClue(performer.clone()))
                         },
@@ -240,9 +250,9 @@ pub enum GameState {
 
 #[derive(Debug, Clone)]
 pub struct DrawClue {
-    clue: Option<Clue>,
-    performer: Player,
-    guesser: Player,
+    pub clue: Option<Clue>,
+    pub performer: Player,
+    pub guesser: Player,
 }
 
 #[derive(Debug, Clone)]
