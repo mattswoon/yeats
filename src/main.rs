@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use tokio::time::{Duration, sleep};
 use async_trait::async_trait;
 use serenity::{
@@ -8,7 +9,10 @@ use serenity::{
         Args,
         StandardFramework,
         CommandResult,
-        macros::{command, group},
+        CommandGroup,
+        HelpOptions,
+        macros::{command, group, help},
+        help_commands::plain,
     },
 };
 use yeats::{
@@ -31,6 +35,7 @@ use yeats::{
     },
 };
 
+/// Print the status of the game
 #[command]
 async fn status(ctx: &Context, msg: &Message) -> CommandResult {
     Executor::new(ctx, msg)
@@ -41,6 +46,7 @@ async fn status(ctx: &Context, msg: &Message) -> CommandResult {
         .await
 }
 
+/// Reset the game back to nothing - WARNING clears all clues and players
 #[command]
 async fn reset(ctx: &Context, msg: &Message) -> CommandResult {
     Executor::new(ctx, msg)
@@ -54,6 +60,7 @@ async fn reset(ctx: &Context, msg: &Message) -> CommandResult {
         .await
 }
 
+/// Join the game
 #[command]
 async fn join(ctx: &Context, msg: &Message) -> CommandResult {
     Executor::new(ctx, msg)
@@ -67,6 +74,10 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
         .await
 }
 
+/// Add a clue to the bowl. This can only be done before the game states. You should 
+/// direct message your clues to Yeats, if you !add-clue in channel everyone will see
+/// (Yeats will try to delete your message as quickly as possible and remind you to
+/// DM them, but others may still see your secrets)
 #[command]
 #[aliases("add-clue")]
 async fn add_clue(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
@@ -101,6 +112,8 @@ async fn add_clue(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     }
 }
 
+/// Starts the game. After the game as started no more players can join
+/// nor can clues be added to the bowl.
 #[command]
 #[aliases("start-game")]
 async fn start_game(ctx: &Context, msg: &Message) -> CommandResult {
@@ -124,6 +137,8 @@ async fn start_game(ctx: &Context, msg: &Message) -> CommandResult {
         .await
 }
 
+/// Gets the next turn ready and tags the players involved so they no to 
+/// put on their drama hat
 #[command]
 #[aliases("next-turn")]
 async fn next_turn(ctx: &Context, msg: &Message) -> CommandResult {
@@ -150,6 +165,10 @@ async fn next_turn(ctx: &Context, msg: &Message) -> CommandResult {
         .await
 }
 
+/// Starts the timer and draws the first clue for the performer. Clues are DM'd
+/// to the performer, and when they feel the guesser has got the answer close enough
+/// they should tell the guesser they're correct, and DM yeats "y", "Y" or "next-clue"
+/// or the message the channel "!y", "!Y" or "!next-clue" to draw the next clue
 #[command]
 #[aliases("start-turn")]
 async fn start_turn(ctx: &Context, msg: &Message) -> CommandResult {
@@ -235,6 +254,7 @@ async fn start_turn(ctx: &Context, msg: &Message) -> CommandResult {
         .await
 }
 
+/// Draws the next clue if you're the current performer, otherwise tells you to piss off.
 #[command]
 #[aliases("next-clue", "y", "Y")]
 async fn next_clue(ctx: &Context, msg: &Message) -> CommandResult {
@@ -274,6 +294,9 @@ async fn next_clue(ctx: &Context, msg: &Message) -> CommandResult {
         .await
 }
 
+/// Once the bowl has run out of clues, it's time for the next round. All the clues
+/// are put back into the bowl and the turn order (as well as the performer/guesser pairs)
+/// are shuffled. If it's not time to start a new round you'll be told so.
 #[command]
 #[aliases("next-round")]
 async fn next_round(ctx: &Context, msg: &Message) -> CommandResult {
@@ -286,6 +309,19 @@ async fn next_round(ctx: &Context, msg: &Message) -> CommandResult {
         .await
         .send()
         .await
+}
+
+#[help]
+async fn my_help(
+    context: &Context,
+    msg: &Message,
+    args: Args,
+    help_options: &'static HelpOptions,
+    groups: &[&'static CommandGroup],
+    owners: HashSet<UserId>
+) -> CommandResult {
+    let _ = plain(context, msg, args, &help_options, groups, owners).await;
+    Ok(())
 }
 
 #[group]
@@ -321,6 +357,7 @@ async fn main() {
     let framework = StandardFramework::new()
         .configure(|c| c.prefix("!")
                    .no_dm_prefix(true))
+        .help(&MY_HELP)
         .group(&YEATS_GROUP);
 
     let mut client = ClientBuilder::new(token)
