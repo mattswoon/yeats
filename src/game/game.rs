@@ -76,6 +76,7 @@ impl Game {
                     .trim()
                     .to_string()
             },
+            GameState::End => format!("Game as finished"),
             _ => format!("I dunno??"),
         }
     }
@@ -195,21 +196,21 @@ impl Game {
         }
     }
 
-    pub fn start_turn(&mut self) -> Result<Turn, Error> {
-        let (new_state, turn) = match &self.state {
+    pub fn start_turn(&mut self) -> Result<(Turn, i64), Error> {
+        let (new_state, turn, round_number) = match &self.state {
             GameState::Round(r) => r.clone()
                 .start_turn()
-                .map(|(new_r, t)| (GameState::Round(new_r), t)),
+                .map(|(new_r, t)| (GameState::Round(new_r), t, r.round_number)),
             GameState::PreGame => Err(Error::GameNotStartedYet),
             GameState::End => Err(Error::GameFinished)
         }?;
         self.state = new_state;
-        Ok(turn)
+        Ok((turn, round_number))
     }
     
-    pub fn end_turn(&mut self, p: &Player, g: &Player) -> Result<(), Error> {
+    pub fn end_turn(&mut self, p: &Player, g: &Player, round_number: i64) -> Result<(), Error> {
         let new_state = match &self.state {
-            GameState::Round(r) => r.clone().end_turn(p, g).map(GameState::Round),
+            GameState::Round(r) => r.clone().end_turn(p, g, round_number).map(GameState::Round),
             GameState::PreGame => Err(Error::GameNotStartedYet),
             GameState::End => Err(Error::GameFinished)
         }?;
@@ -239,6 +240,13 @@ impl Game {
                 turn_queue: _,
                 current_turn: Some(Turn { performer, guesser: _, state: _})
             }) => Some(performer.clone()),
+            _ => None
+        }
+    }
+
+    pub fn current_round_number(&self) -> Option<i64> {
+        match &self.state {
+            GameState::Round(r) => Some(r.round_number),
             _ => None
         }
     }
@@ -382,10 +390,10 @@ impl Round {
         }
     }
 
-    pub fn end_turn(self, p: &Player, g: &Player) -> Result<Round, Error> {
+    pub fn end_turn(self, p: &Player, g: &Player, round_number: i64) -> Result<Round, Error> {
         match self.current_turn {
             Some(t) => {
-                if (p == &t.performer) & (g == &t.guesser) {
+                if (p == &t.performer) & (g == &t.guesser) & (self.round_number == round_number) {
                     match t.state {
                         TurnState::Guessing(_) => Ok(Round {
                             round_number: self.round_number,

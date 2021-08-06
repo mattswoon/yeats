@@ -18,6 +18,7 @@ pub enum Error {
     PlayerNotAllowedToDrawAClue,
     EmptyBowl,
     BowlNotEmpty,
+    NoRound,
 }
 
 impl std::fmt::Display for Error {
@@ -54,6 +55,8 @@ impl std::fmt::Display for Error {
                 write!(f, "Bowl is empty"),
             Error::BowlNotEmpty =>
                 write!(f, "Bowl isn't empty"),
+            Error::NoRound =>
+                write!(f, "Game is not currently in any round")
         }
     }
 }

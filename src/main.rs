@@ -25,6 +25,7 @@ use yeats::{
     respond2::{
         Respondable,
         OrSend,
+        OrLog,
         Executor,
         ResponseOk,
     },
@@ -150,7 +151,7 @@ async fn next_turn(ctx: &Context, msg: &Message) -> CommandResult {
 #[command]
 #[aliases("start-turn")]
 async fn start_turn(ctx: &Context, msg: &Message) -> CommandResult {
-    let Turn { performer, guesser, .. } = Executor::new(ctx, msg)
+    let (Turn { performer, guesser, .. }, round_number) = Executor::new(ctx, msg)
         .try_write_and_get(|g| {
             g.start_turn()
         })
@@ -175,7 +176,7 @@ async fn start_turn(ctx: &Context, msg: &Message) -> CommandResult {
                     .with_dm_channel(dm_chan)
                     .with_content(format!("Your clue is:\n{}", clue)))
             } else {
-                g.end_turn(&performer, &guesser)?;
+                g.end_turn(&performer, &guesser, round_number)?;
                 let reply = g.turn_summary()?.to_string();
                 let channel = g.main_channel.clone().ok_or(Error::NoChannel)?;
                 Ok(ResponseOk::new(ctx, msg)
@@ -194,37 +195,27 @@ async fn start_turn(ctx: &Context, msg: &Message) -> CommandResult {
     sleep(Duration::from_secs(60)).await;
     log::info!("Times up for {} -> {}", &performer, &guesser);
 
-    let reply: Option<String> = Executor::new(ctx, msg)
+    let reply: String = Executor::new(ctx, msg)
         .try_write_and_get(|g| {
-            match g.end_turn(&performer, &guesser) {
-                Err(Error::TurnDoesntMatchPlayers) => Ok(None),
-                Err(Error::CurrentTurnHasEnded) => Ok(None),
-                Ok(_) => {
-                    Ok(Some(g.turn_summary()?.to_string()))
-                },
-                Err(e) => Err(e),
-            }
+            g.end_turn(&performer, &guesser, round_number)
+                .and_then(|()| g.turn_summary().map(|s| s.to_string()))
         })
         .await
-        .or_send()
-        .await?;
+        .or_log()?;
 
-    if let Some(reply) = reply {
-        Executor::new(ctx, msg)
-            .try_read(|g| {
-                let channel = g.main_channel.clone().ok_or(Error::NoChannel)?;
-                Ok(ResponseOk::new(ctx, msg)
-                    .with_channel(channel)
-                    .with_content(format!("Time's up! {} and {}, you solved the following clues:\n{}",
-                                          &performer,
-                                          &guesser,
-                                          reply)))
-            })
-            .await
-            .send()
-            .await?;
-    }
-    Ok(())
+    Executor::new(ctx, msg)
+        .try_read(|g| {
+            let channel = g.main_channel.clone().ok_or(Error::NoChannel)?;
+            Ok(ResponseOk::new(ctx, msg)
+                .with_channel(channel)
+                .with_content(format!("Time's up! {} and {}, you solved the following clues:\n{}",
+                                      &performer,
+                                      &guesser,
+                                      reply)))
+        })
+        .await
+        .send()
+        .await
 }
 
 #[command]
@@ -247,7 +238,9 @@ async fn next_clue(ctx: &Context, msg: &Message) -> CommandResult {
                     .with_dm_channel(dm_chan)
                     .with_content(format!("Your clue is:\n{}", clue)))
             } else {
-                g.end_turn(&performer, &guesser)?;
+                let round_number = g.current_round_number()
+                    .ok_or(Error::NoRound)?;
+                g.end_turn(&performer, &guesser, round_number)?;
                 let reply = g.turn_summary()?.to_string();
                 let channel = g.main_channel.clone().ok_or(Error::NoChannel)?;
                 Ok(ResponseOk::new(ctx, msg)

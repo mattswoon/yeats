@@ -302,3 +302,26 @@ where
         }
     }
 }
+
+pub trait OrLog {
+    type OkType;
+
+    fn or_log(self) -> CommandResult<Self::OkType>;
+}
+
+impl<T> OrLog for Result<T, ResponseErr<'_>>
+where
+    T: Send
+{
+    type OkType = T;
+
+    fn or_log(self) -> CommandResult<T> {
+        match self {
+            Ok(o) => Ok(o),
+            Err(e) => {
+                log::warn!("{}", &e.error);
+                Err(Box::new(e.error))
+            }
+        }
+    }
+}
