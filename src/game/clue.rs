@@ -11,6 +11,6 @@ pub struct Clue {
 
 impl Display for Clue {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "```\nEntered by: {}\n\n{}\n```", self.entered_by.name, self.text)
+        write!(f, "```\n{}\n```", self.text)
     }
 }
