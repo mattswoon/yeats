@@ -1,4 +1,5 @@
 use tokio::time::{Duration, sleep};
+use async_trait::async_trait;
 use serenity::{
     prelude::*,
     model::prelude::*,
@@ -69,8 +70,8 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
 #[command]
 #[aliases("add-clue")]
 async fn add_clue(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    let text = args.rest().into();
     if msg.is_private() {
-        let text = args.rest().into();
         let entered_by = (&msg.author).into();
         Executor::new(ctx, msg)
             .try_write(|g| {
@@ -82,10 +83,21 @@ async fn add_clue(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
             .send()
             .await
     } else {
-        ResponseOk::new(ctx, msg)
-            .with_content("Umm... you're supposed to dm that to me".to_string())
+        msg.delete(ctx)
+            .await?;
+        let channel = msg.channel(ctx).await
+            .ok_or(Error::NoChannel)?
+            .guild()
+            .ok_or(Error::NotAGuildChannel)?;
+        ResponseOk::new(ctx, &msg)
+            .with_content(format!("{} Umm... you're supposed to dm that to me", msg.author))
+            .with_channel(channel)
             .send()
             .await
+            .or_else(|e| {
+                log::warn!("{}", e);
+                Err(e)
+            })
     }
 }
 
@@ -292,6 +304,7 @@ struct Yeats;
 
 struct Handler;
 
+#[async_trait]
 impl EventHandler for Handler {}
 
 #[tokio::main]
