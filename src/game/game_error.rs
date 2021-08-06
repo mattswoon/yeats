@@ -3,7 +3,7 @@ use crate::game::{
     player::Player,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum GameError {
     CantDoThat,
     AlreadyStarted,

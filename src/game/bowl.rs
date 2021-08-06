@@ -22,8 +22,12 @@ impl Bowl {
         }
     }
 
-    pub fn add_clue(&mut self, c: Clue) -> () {
-        self.unsolved.append(&mut vec![c]);
+    pub fn showing(&self) -> Option<Clue> {
+        self.showing.clone()
+    }
+
+    pub fn add_clue(&mut self, c: &Clue) {
+        self.unsolved.append(&mut vec![c.clone()]);
     }
 
     pub fn shuffle(&mut self) {
@@ -33,12 +37,14 @@ impl Bowl {
 
     pub fn draw_clue(&mut self) -> Option<Clue> {
         let clue = self.unsolved.pop();
+        log::debug!("{:?} being shown", &clue);
         self.showing = clue.clone();
         clue
     }
 
     pub fn put_back(&mut self) {
         if let Some(c) = &self.showing {
+            log::debug!("{} marked as unsolved", &c);
             self.unsolved.push(c.clone());
             self.showing = None;
             self.shuffle();
@@ -47,6 +53,7 @@ impl Bowl {
 
     pub fn solve_showing_clue(&mut self) {
         if let Some(c) = &self.showing {
+            log::debug!("{} marked as solved", &c);
             self.solved.push(c.clone());
             self.showing = None;
         }
@@ -68,5 +75,9 @@ impl Bowl {
             .map(|(k, v)| format!("{}: {}", k, v))
             .collect::<Vec<_>>()
             .join("\n\t\t")
+    }
+
+    pub fn num_unsolved(&self) -> usize {
+        self.unsolved.len()
     }
 }

@@ -22,11 +22,11 @@ use yeats::{
         clue::Clue,
         turn::Turn,
     },
-    respond::{
-        Respondable, 
-        send,
-        or_reply_to_message,
-        or_reply_in_channel,
+    respond2::{
+        Respondable,
+        OrSend,
+        Executor,
+        ResponseOk,
     },
 };
 
@@ -41,66 +41,38 @@ async fn get_main_channel(ctx: &Context) -> Result<Option<GuildChannel>, Error> 
 
 #[command]
 async fn status(ctx: &Context, msg: &Message) -> CommandResult {
-    log::info!("{} is checking status", msg.author.name);
-    send(ctx, ctx.data
-            .read()
-            .await
-            .get::<Game>()
-            .ok_or(Error::NoGame)
-            .map(Game::status)
-            .reply_to_message(msg)).await
+    Executor::new(ctx, msg)
+        .read(|g| ResponseOk::new(ctx, msg)
+              .with_content(g.status()))
+        .await
+        .send()
+        .await
 }
 
 #[command]
 async fn reset(ctx: &Context, msg: &Message) -> CommandResult {
-    log::info!("{} is resetting the game", msg.author.name);
-    send(ctx, ctx.data.write()
-            .await
-            .get_mut::<Game>()
-            .ok_or(Error::NoGame)
-            .map(Game::reset)
-            .reply_to_message(msg)).await
-}
-
-#[command]
-#[aliases("add-players")]
-async fn add_players(ctx: &Context, msg: &Message) -> CommandResult {
-    let mut players: Vec<Player> = msg.mentions
-        .iter()
-        .map(|u| u.into())
-        .collect();
-    log::info!("{} is adding players {}", msg.author.name, &players.iter().join(", "));
-    send(ctx, ctx.data.write()
-            .await
-            .get_mut::<Game>()
-            .ok_or(Error::NoGame)
-            .and_then(|g| g.add_players(&mut players).map_err(Error::GameError))
-            .reply_to_message(msg)).await
+    Executor::new(ctx, msg)
+        .write(|g| {
+            log::info!("{} reset the game", msg.author.name);
+            g.reset();
+            ResponseOk::new(ctx, msg)
+                .with_react('👍')})
+        .await
+        .send()
+        .await
 }
 
 #[command]
 async fn join(ctx: &Context, msg: &Message) -> CommandResult {
-    log::info!("{} is joining the game", msg.author.name);
-    let player: Player = (&msg.author).into();
-    send(ctx, ctx.data
-         .write()
-         .await
-         .get_mut::<Game>()
-         .ok_or(Error::NoGame)
-         .and_then(|g| g.add_player(player).map_err(Error::GameError))
-         .reply_to_message(msg)).await
-}
-
-#[command]
-#[aliases("list-players")]
-async fn list_players(ctx: &Context, msg: &Message) -> CommandResult {
-    log::info!("{} is listing players", msg.author.name);
-    send(ctx, ctx.data.read()
-            .await
-            .get::<Game>()
-            .ok_or(Error::NoGame)
-            .map(Game::list_players)
-            .reply_to_message(msg)).await
+    Executor::new(ctx, msg)
+        .try_write(|g| {
+            g.add_player((&msg.author).into())?;
+            log::info!("{} joined the game", msg.author);
+            Ok(ResponseOk::new(ctx, msg)
+                .with_content(format!("{} joined the game", msg.author.name))) })
+        .await
+        .send()
+        .await
 }
 
 #[command]
@@ -108,163 +80,211 @@ async fn list_players(ctx: &Context, msg: &Message) -> CommandResult {
 async fn add_clue(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     if msg.is_private() {
         let text = args.rest().into();
-        let entered_by: Player = (&msg.author).into();
-        log::info!("Adding clue from {}", &entered_by);
-        send(ctx, ctx.data
-                .write()
-                .await
-                .get_mut::<Game>()
-                .ok_or(Error::NoGame)
-                .and_then(|g| g.add_clue(Clue { entered_by, text })
-                          .map_err(Error::GameError))
-                .reply_to_message(msg)).await
+        let entered_by = (&msg.author).into();
+        Executor::new(ctx, msg)
+            .try_write(|g| {
+                let clue = Clue { entered_by, text };
+                g.add_clue(&clue)?;
+                Ok(ResponseOk::new(ctx, msg)
+                   .with_content(format!("The clue has been added to the bowl:\n```\n{}\n```", clue.text))) })
+            .await
+            .send()
+            .await
     } else {
-        send(ctx, "Umm... you're supposed to dm that to me".to_string()
-             .reply_to_message(msg)).await
+        ResponseOk::new(ctx, msg)
+            .with_content("Umm... you're supposed to dm that to me".to_string())
+            .send()
+            .await
     }
-}
-
-#[command]
-#[aliases("debug-mode")]
-async fn debug_mode(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    if msg.is_private() {
-        if args.rest() == "motherlode" {
-            log::info!("Setting {} as game admin", &msg.author);
-            ctx.data
-                .write()
-                .await
-                .get_mut::<Game>()
-                .map(|g| g.set_admin(msg.author.clone()))
-                .ok_or(Error::NoGame)?;
-            send(ctx, "Shh, it's our little secret".reply_to_message(msg)).await?;
-        } else {
-            log::info!("User {} tried to set themselves as admin but got the password wrong", 
-                       &msg.author);
-        }
-    } else {
-        log::info!("User {} tried to set themselves as admin but not in a private channel",
-                   &msg.author);
-    }
-    Ok(())
 }
 
 #[command]
 #[aliases("start-game")]
 async fn start_game(ctx: &Context, msg: &Message) -> CommandResult {
     log::info!("Starting game");
+
     let channel = msg.channel(ctx)
         .await
         .ok_or(Error::NoChannel)
         .and_then(|c| c.guild().ok_or(Error::NotAGuildChannel));
 
-    match channel {
-        Ok(channel) => {
-            send(ctx, ctx.data
-                    .write()
-                    .await
-                    .get_mut::<Game>()
-                    .ok_or(Error::NoGame)
-                    .and_then(|g| g.start_game(channel).map_err(Error::GameError))
-                    .reply_to_message(msg)).await
-        },
-        Err(e) => {
-            send(ctx, (&e).reply_to_message(msg)).await?;
-            Err(e.into())
-        }
-    }
+    Executor::new(ctx, msg)
+        .try_write(|g| {
+            let channel = channel?;
+            g.start_game(channel.clone())?;
+            Ok(ResponseOk::new(ctx, msg)
+               .with_channel(channel)
+               .with_content("Starting game".to_string()))
+        })
+        .await
+        .send()
+        .await
 }
 
 #[command]
 #[aliases("next-turn")]
 async fn next_turn(ctx: &Context, msg: &Message) -> CommandResult {
-    log::info!("Queueing next turn");
-    send(ctx,
-        ctx.data
-            .write()
-            .await
-            .get_mut::<Game>()
-            .ok_or(Error::NoGame)
-            .and_then(|g| g.prepare_turn().map_err(Error::GameError))
-            .reply_to_message(msg)).await
+    let (turn, channel) = Executor::new(ctx, msg)
+        .try_write_and_get(|g| {
+            let channel = g.main_channel
+                .clone()
+                .ok_or(Error::NoChannel)?;
+            let turn = g.prepare_turn()?;
+            Ok((turn, channel))
+        })
+        .await
+        .or_send()
+        .await?;
+    log::debug!("{:?}", &turn);
+    ResponseOk::new(ctx, msg)
+        .with_channel(channel)
+        .with_content(format!(
+            "Get ready! {} will be performing for {}",
+            turn.performer,
+            turn.guesser
+            ))
+        .send()
+        .await
 }
 
 #[command]
 #[aliases("start-turn")]
 async fn start_turn(ctx: &Context, msg: &Message) -> CommandResult {
-    log::info!("Starting turn");
-    let channel = or_reply_to_message(
-        ctx, 
-        msg, 
-        get_main_channel(ctx).await
-            .and_then(|oc| oc.ok_or(Error::NoChannel))
-    ).await?;
-    // HERE
-    let turn = or_reply_in_channel(
-        ctx, 
-        &channel,
-        ctx.data
-            .write()
-            .await
-            .get_mut::<Game>()
-            .ok_or(Error::NoGame)
-            .and_then(|g| g.start_turn().map_err(Error::GameError)) 
-        ).await?; 
-
-    let Turn { performer, guesser, state: _ } = turn;
+    let Turn { performer, guesser, .. } = Executor::new(ctx, msg)
+        .try_write_and_get(|g| {
+            g.start_turn()
+        })
+    .await
+    .or_send()
+    .await?;
+    // Send a clue
+    
+    let dm_chan = performer.user
+        .create_dm_channel(ctx)
+        .await
+        .or_else(|e| {
+            log::warn!("{}", &e);
+            Err(e)
+        })?;
+    
+    Executor::new(ctx, msg)
+        .try_write(|g| {
+            let DrawClue { clue, .. } = g.draw_clue(&performer)?;
+            if let Some(clue) = clue {
+                Ok(ResponseOk::new(ctx, msg)
+                    .with_dm_channel(dm_chan)
+                    .with_content(format!("Your clue is:\n{}", clue)))
+            } else {
+                g.end_turn(&performer, &guesser)?;
+                let reply = g.turn_summary()?.to_string();
+                let channel = g.main_channel.clone().ok_or(Error::NoChannel)?;
+                Ok(ResponseOk::new(ctx, msg)
+                    .with_channel(channel)
+                    .with_content(format!("Turn's over because the bowl is empty. Well done {} and {}, you solved the following clues:\n{}",
+                                          &performer,
+                                          &guesser,
+                                          reply)))
+            }
+        })
+        .await
+        .send()
+        .await?;
 
     log::info!("Starting timer for {} -> {}", &performer, &guesser);
     sleep(Duration::from_secs(60)).await;
-    log::info!("Ending turn {} -> {}", &performer, &guesser);
-    ctx.data
-        .write()
+    log::info!("Times up for {} -> {}", &performer, &guesser);
+
+    let reply: Option<String> = Executor::new(ctx, msg)
+        .try_write_and_get(|g| {
+            match g.end_turn(&performer, &guesser) {
+                Err(Error::TurnDoesntMatchPlayers) => Ok(None),
+                Err(Error::CurrentTurnHasEnded) => Ok(None),
+                Ok(_) => {
+                    Ok(Some(g.turn_summary()?.to_string()))
+                },
+                Err(e) => Err(e),
+            }
+        })
         .await
-        .get_mut::<Game>()
-        .map(|g| g.end_turn(&performer, &guesser))
-        .ok_or(Error::NoGame)?
-        .map_err(Error::GameError)?;
+        .or_send()
+        .await?;
+
+    if let Some(reply) = reply {
+        Executor::new(ctx, msg)
+            .try_read(|g| {
+                let channel = g.main_channel.clone().ok_or(Error::NoChannel)?;
+                Ok(ResponseOk::new(ctx, msg)
+                    .with_channel(channel)
+                    .with_content(format!("Time's up! {} and {}, you solved the following clues:\n{}",
+                                          &performer,
+                                          &guesser,
+                                          reply)))
+            })
+            .await
+            .send()
+            .await?;
+    }
     Ok(())
 }
 
 #[command]
 #[aliases("next-clue", "y", "Y")]
 async fn next_clue(ctx: &Context, msg: &Message) -> CommandResult {
-    let by = (&msg.author).into();
-    let drawclue = or_reply_to_message(
-        ctx, 
-        msg, 
-        ctx.data
-            .write()
-            .await
-            .get_mut::<Game>()
-            .ok_or(Error::NoGame)
-            .and_then(|g| g.draw_clue(&by).map_err(Error::GameError))).await?;
-
-    match drawclue {
-        DrawClue { clue: Some(c), .. } => {
-            msg.author.dm(ctx, |m| m.content(c.text)).await?;
-            Ok(())
-        },
-        DrawClue { clue: None, performer, guesser } => {
-            end_turn(ctx, &performer, &guesser).await?;
-            Ok(())
-        }
-    }
-}
-
-async fn end_turn(ctx: &Context, performer: &Player, guesser: &Player) -> Result<(), Error> {
-    ctx.data
-        .write()
+    let by: Player = (&msg.author).into();
+    let dm_chan = by.user
+        .create_dm_channel(ctx)
         .await
-        .get_mut::<Game>()
-        .ok_or(Error::NoGame)
-        .and_then(|g| {
-            g.end_turn(performer, guesser)
-                .map_err(Error::GameError)})
+        .or_else(|e| {
+            log::warn!("{}", &e);
+            Err(e)
+        })?;
+    
+    Executor::new(ctx, msg)
+        .try_write(|g| {
+            let DrawClue { clue, performer, guesser } = g.draw_clue(&by)?;
+            if let Some(clue) = clue {
+                Ok(ResponseOk::new(ctx, msg)
+                    .with_dm_channel(dm_chan)
+                    .with_content(format!("Your clue is:\n{}", clue)))
+            } else {
+                g.end_turn(&performer, &guesser)?;
+                let reply = g.turn_summary()?.to_string();
+                let channel = g.main_channel.clone().ok_or(Error::NoChannel)?;
+                Ok(ResponseOk::new(ctx, msg)
+                    .with_channel(channel)
+                    .with_content(format!("Turn's over because the bowl is empty. Well done {} and {}, you solved the following clues:\n{}",
+                                          &performer,
+                                          &guesser,
+                                          reply)))
+            }
+        })
+        .await
+        .send()
+        .await
 }
 
+//async fn end_turn(ctx: &Context, performer: &Player, guesser: &Player) -> Result<(), Error> {
+//    ctx.data
+//        .write()
+//        .await
+//        .get_mut::<Game>()
+//        .ok_or(Error::NoGame)
+//        .and_then(|g| {
+//            g.end_turn(performer, guesser)
+//                .map_err(Error::GameError)})
+//}
+//
 #[group]
-#[commands(reset, add_players, status, list_players, add_clue, join,
-           debug_mode, start_game, next_turn, start_turn)]
+#[commands(
+    status, 
+    reset, 
+    join, 
+    add_clue, 
+    start_game, 
+    next_turn,
+    start_turn,
+    next_clue,
+)]
 struct Yeats;
 
 struct Handler;
@@ -275,7 +295,7 @@ impl EventHandler for Handler {}
 async fn main() {
     simple_logger::SimpleLogger::new()
         .with_level(log::LevelFilter::Off)
-        .with_module_level("yeats", log::LevelFilter::Info)
+        .with_module_level("yeats", log::LevelFilter::Debug)
         .init()
         .expect("Couldn't init logger");
 

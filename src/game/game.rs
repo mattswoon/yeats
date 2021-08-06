@@ -14,12 +14,15 @@ use serenity::{
     },
     utils::MessageBuilder,
 };
-use crate::game::{
-    game_error::GameError,
-    player::Player,
-    turn::{TurnState, Turn},
-    bowl::Bowl,
-    clue::Clue,
+use crate::{
+    error::Error,
+    game::{
+        game_error::GameError,
+        player::Player,
+        turn::{TurnState, Turn, TurnSummary},
+        bowl::Bowl,
+        clue::Clue,
+    },
 };
 
 pub struct Game {
@@ -47,34 +50,33 @@ impl Game {
         }
     }
 
-    pub fn reset(&mut self) -> Option<String> {
+    pub fn reset(&mut self) {
         *self = Game::new();
-        None
     }
 
-    pub fn status(&self) -> Option<String> {
+    pub fn status(&self) -> String {
         match &self.state {
             GameState::PreGame => {
-                Some(format!("Game is yet to start, feel free to join or add more clues.\n\tPlayers:\t{}\n\tClues added:\t{}", 
+                format!("Game is yet to start, feel free to join or add more clues.\n\tPlayers:\t{}\n\tClues added:\t{}", 
                         self.players
                             .iter()
                             .map(|p| p.name.clone())
                             .collect::<Vec<_>>()
                             .join("\n\t\t"), 
-                        self.bowl.status()))
+                        self.bowl.status())
             },
             GameState::Round(round) => {
                 let turn_status = round.current_turn
                     .as_ref()
                     .map(Turn::status)
                     .unwrap_or("".to_string());
-                Some(format!("We're currently playing round {}. {}", 
+                format!("We're currently playing round {}. {}", 
                         &round.round_number, 
                         turn_status)
                     .trim()
-                    .to_string())
+                    .to_string()
             },
-            _ => Some(format!("I dunno??")),
+            _ => format!("I dunno??"),
         }
     }
 
@@ -97,14 +99,13 @@ impl Game {
         }
     }
 
-    pub fn add_player(&mut self, p: Player) -> Result<Option<String>, GameError> {
+    pub fn add_player(&mut self, p: Player) -> Result<(), Error> {
         match self.state {
             GameState::PreGame => {
-                let reply = format!("{} joined the game", &p.name);
                 (*self).players.push(p);
-                Ok(Some(reply))
+                Ok(())
             },
-            _ => Err(GameError::AlreadyStarted)
+            _ => Err(Error::GameAlreadyStarted)
         }
     }
 
@@ -116,13 +117,13 @@ impl Game {
              .join("\n"))
     }
 
-    pub fn add_clue(&mut self, c: Clue) -> Result<Option<String>, GameError> {
+    pub fn add_clue(&mut self, c: &Clue) -> Result<(), Error> {
         match self.state {
             GameState::PreGame => {
                 self.bowl.add_clue(c);
-                Ok(None)
+                Ok(())
             },
-            _ => Err(GameError::AlreadyStarted)
+            _ => Err(Error::GameAlreadyStarted)
         }
     }
 
@@ -147,24 +148,33 @@ impl Game {
         Ok(())
     }
 
-    pub fn start_game(&mut self, channel: GuildChannel) -> Result<Option<String>, GameError> {
+    pub fn start_game(&mut self, channel: GuildChannel) -> Result<(), Error> {
         match &self.state {
             GameState::PreGame => {
                 self.state = GameState::Round(Round::new(1, &self.players));
                 self.main_channel = Some(channel);
-                Ok(Some("Welcome to the game".to_string()))
+                Ok(())
             },
-            _ => Err(GameError::AlreadyStarted)
+            _ => Err(Error::GameAlreadyStarted)
         }
     }
 
-    pub fn prepare_turn(&mut self) -> Result<Option<String>, GameError> {
+    pub fn prepare_turn(&mut self) -> Result<Turn, Error> {
+        if self.bowl.num_unsolved() == 0 {
+            return Err(Error::EmptyBowl);
+        }
         match &self.state {
             GameState::Round(r) => r.clone().prepare_turn().map(GameState::Round),
-            GameState::PreGame => Err(GameError::CantDoThat),
-            GameState::End => Err(GameError::CantDoThat)
-        }.map(|new_state| self.state = new_state)
-        .and_then(|_| self.ready_turn_message().map(Some))
+            GameState::PreGame => Err(Error::GameNotStartedYet),
+            GameState::End => Err(Error::GameFinished)
+        }.and_then(|new_state| {
+            self.state = new_state.clone();
+            match new_state {
+                GameState::Round(r) => r.current_turn.ok_or(Error::NoTurnsQueued),
+                GameState::PreGame => Err(Error::GameNotStartedYet),
+                GameState::End => Err(Error::GameFinished),
+            }
+        })
     }
 
     pub fn ready_turn_message(&self) -> Result<String, GameError> {
@@ -175,26 +185,41 @@ impl Game {
         }
     }
 
-    pub fn start_turn(&mut self) -> Result<Turn, GameError> {
+    pub fn start_turn(&mut self) -> Result<Turn, Error> {
         let (new_state, turn) = match &self.state {
             GameState::Round(r) => r.clone()
                 .start_turn()
                 .map(|(new_r, t)| (GameState::Round(new_r), t)),
-            GameState::PreGame => Err(GameError::CantDoThat),
-            GameState::End => Err(GameError::CantDoThat)
+            GameState::PreGame => Err(Error::GameNotStartedYet),
+            GameState::End => Err(Error::GameFinished)
         }?;
         self.state = new_state;
         Ok(turn)
     }
     
-    pub fn end_turn(&mut self, p: &Player, g: &Player) -> Result<(), GameError> {
+    pub fn end_turn(&mut self, p: &Player, g: &Player) -> Result<(), Error> {
         let new_state = match &self.state {
             GameState::Round(r) => r.clone().end_turn(p, g).map(GameState::Round),
-            GameState::PreGame => Err(GameError::CantDoThat),
-            GameState::End => Err(GameError::CantDoThat)
+            GameState::PreGame => Err(Error::GameNotStartedYet),
+            GameState::End => Err(Error::GameFinished)
         }?;
+        self.bowl.put_back();
         self.state = new_state;
         Ok(())
+    }
+
+    pub fn turn_summary(&self) -> Result<TurnSummary, Error> {
+        match &self.state {
+            GameState::Round(r) => { // HERE
+                match r.current_turn.clone().ok_or(Error::NoTurnsQueued)?.state {
+                    TurnState::Ready => Err(Error::CurrentTurnNotYetStarted),
+                    TurnState::Guessing(summ) => Ok(summ),
+                    TurnState::Ended(summ) => Ok(summ),
+                }
+            },
+            GameState::PreGame => Err(Error::GameNotStartedYet),
+            GameState::End => Err(Error::GameFinished),
+        }
     }
 
     pub fn current_performer(&self) -> Option<Player> {
@@ -208,40 +233,42 @@ impl Game {
         }
     }
 
-    pub fn draw_clue(&mut self, by: &Player) -> Result<DrawClue, GameError> {
-        match &self.state {
+    pub fn draw_clue(&mut self, by: &Player) -> Result<DrawClue, Error> {
+        let (draw_clue, state) = match &self.state {
             GameState::Round(round) => {
                 match &round.current_turn {
-                    Some(Turn { performer, guesser, state: TurnState::Guessing }) =>
+                    Some(Turn { performer, guesser, state: TurnState::Guessing(summ) }) =>
                         if performer == by {
+                            let summ = self.bowl.showing()
+                                .map(|showing| summ.clone().with_clue(showing))
+                                .unwrap_or(summ.clone());
+                            
+                            self.bowl.solve_showing_clue();
                             let clue = self.bowl.draw_clue();
-                            Ok(DrawClue {
+                            Ok((DrawClue {
                                 clue: clue,
                                 performer: performer.clone(),
                                 guesser: guesser.clone(),
-                            })
+                            }, GameState::Round(round.clone().with_current_turn(round.current_turn.clone().map(|t| t.with_state(TurnState::Guessing(summ)))))))
                         } else {
-                            Err(GameError::PlayerNotAllowedToDrawAClue(performer.clone()))
+                            Err(Error::PlayerNotAllowedToDrawAClue)
                         },
                     Some(Turn { performer, guesser, state: TurnState::Ready }) => 
-                        Err(GameError::BadTurnState(Turn { 
-                            performer: performer.clone(), 
-                            guesser: guesser.clone(), 
-                            state: TurnState::Ready})),
-                    Some(Turn { performer, guesser, state: TurnState::Ended }) => 
-                        Err(GameError::BadTurnState(Turn { 
-                            performer: performer.clone(), 
-                            guesser: guesser.clone(), 
-                            state: TurnState::Ended})),
-                    None => Err(GameError::NoTurnsQueued),
+                        Err(Error::CurrentTurnNotYetStarted),
+                    Some(Turn { performer, guesser, state: TurnState::Ended(_) }) => 
+                        Err(Error::CurrentTurnHasEnded),
+                    None => Err(Error::NoTurnsQueued),
                 }
             },
-            GameState::PreGame => Err(GameError::CantDoThat),
-            GameState::End => Err(GameError::CantDoThat),
-        }
+            GameState::PreGame => Err(Error::GameNotStartedYet),
+            GameState::End => Err(Error::GameFinished),
+        }?;
+        self.state = state;
+        Ok(draw_clue)
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum GameState {
     PreGame,
     Round(Round),
@@ -268,36 +295,45 @@ impl Round {
         let mut rng = thread_rng();
         players.shuffle(&mut rng);
         let turn_queue = players.iter()
-            .zip(players.iter().skip(1).cycle())
+            .zip(players.iter().cycle().skip(1))
             .map(|(p1, p2)| Turn::new(p1.clone(), p2.clone()))
             .collect();
         Round { round_number, turn_queue, current_turn: None }
     }
 
-    pub fn prepare_turn(self) -> Result<Round, GameError> {
+    pub fn with_current_turn(self, current_turn: Option<Turn>) -> Round {
+        Round { current_turn, ..self }
+    }
+
+    pub fn prepare_turn(self) -> Result<Round, Error> {
         match self.current_turn {
             None => {
                 let mut turn_queue = self.turn_queue;
-                let current_turn = turn_queue.pop();
+                let current_turn = turn_queue.pop()
+                    .ok_or(Error::EmptyTurnQueue)?;
                 Ok(Round { 
                     round_number: self.round_number,
                     turn_queue,
-                    current_turn
+                    current_turn: Some(current_turn)
                 })
             },
-            Some(Turn { performer, guesser, state: TurnState::Ended }) => {
+            Some(Turn { performer, guesser, state: TurnState::Ended(_) }) => {
                 let ended_turn = Turn::new(performer.clone(), guesser.clone());
                 let mut turn_queue = self.turn_queue;
                 turn_queue.insert(0, ended_turn);
-                let current_turn = turn_queue.pop();
+                let current_turn = turn_queue.pop()
+                    .ok_or(Error::EmptyTurnQueue)?;
                 Ok(Round {
                     round_number: self.round_number,
                     turn_queue,
-                    current_turn
+                    current_turn: Some(current_turn)
                 })
             },
-            Some(t) => {
-                Err(GameError::BadTurnState(t.clone()))
+            Some(Turn { state: TurnState::Ready, .. }) => {
+                Err(Error::CurrentTurnNotYetFinished)
+            },
+            Some(Turn { state: TurnState::Guessing(_), .. }) => {
+                Err(Error::CurrentTurnNotYetFinished)
             }
         }
     }
@@ -314,14 +350,14 @@ impl Round {
                         .push("!!")
                         .build()
                 ),
-                TurnState::Guessing => Err(GameError::BadTurnState(t.clone())),
-                TurnState::Ended => Err(GameError::BadTurnState(t.clone())),
+                TurnState::Guessing(_) => Err(GameError::BadTurnState(t.clone())),
+                TurnState::Ended(_) => Err(GameError::BadTurnState(t.clone())),
             },
             None => Err(GameError::NoTurnsQueued)
         }
     }
 
-    pub fn start_turn(self) -> Result<(Round, Turn), GameError> {
+    pub fn start_turn(self) -> Result<(Round, Turn), Error> {
         match self.current_turn {
             Some(t) => match t.state {
                 TurnState::Ready => Ok((Round {
@@ -329,35 +365,31 @@ impl Round {
                     turn_queue: self.turn_queue,
                     current_turn: Some(t.clone().as_guessing())
                 }, t.as_guessing())),
-                TurnState::Guessing => Err(GameError::BadTurnState(t)),
-                TurnState::Ended => Err(GameError::BadTurnState(t)),
+                TurnState::Guessing(_) => Err(Error::CurrentTurnNotYetFinished),
+                TurnState::Ended(_) => Err(Error::CurrentTurnHasEnded),
             },
-            None => Err(GameError::NoTurnsQueued),
+            None => Err(Error::NoTurnsQueued),
         }
     }
 
-    pub fn end_turn(self, p: &Player, g: &Player) -> Result<Round, GameError> {
+    pub fn end_turn(self, p: &Player, g: &Player) -> Result<Round, Error> {
         match self.current_turn {
             Some(t) => {
                 if (p == &t.performer) & (g == &t.guesser) {
                     match t.state {
-                        TurnState::Guessing => Ok(Round {
+                        TurnState::Guessing(_) => Ok(Round {
                             round_number: self.round_number,
                             turn_queue: self.turn_queue,
                             current_turn: Some(t.as_ended())
                         }),
-                        TurnState::Ready => Err(GameError::BadTurnState(t)),
-                        TurnState::Ended => Err(GameError::BadTurnState(t))
+                        TurnState::Ready => Err(Error::CurrentTurnNotYetStarted),
+                        TurnState::Ended(_) => Err(Error::CurrentTurnHasEnded),
                     }
                 } else {
-                    Err(GameError::TurnDoesntMatchPlayers {
-                        turn: t,
-                        performer: p.clone(),
-                        guesser: g.clone()
-                    })
+                    Err(Error::TurnDoesntMatchPlayers)
                 }
             },
-            None => Err(GameError::NoTurnsQueued)
+            None => Err(Error::NoTurnsQueued)
         }
     }
 }
