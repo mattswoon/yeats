@@ -184,7 +184,8 @@ async fn start_turn(ctx: &Context, msg: &Message) -> CommandResult {
                     .with_content(format!("Turn's over because the bowl is empty. Well done {} and {}, you solved the following clues:\n{}",
                                           &performer,
                                           &guesser,
-                                          reply)))
+                                          reply))
+                    .with_redact_after(20))
             }
         })
         .await
@@ -211,7 +212,8 @@ async fn start_turn(ctx: &Context, msg: &Message) -> CommandResult {
                 .with_content(format!("Time's up! {} and {}, you solved the following clues:\n{}",
                                       &performer,
                                       &guesser,
-                                      reply)))
+                                      reply))
+                .with_redact_after(20))
         })
         .await
         .send()
@@ -248,7 +250,8 @@ async fn next_clue(ctx: &Context, msg: &Message) -> CommandResult {
                     .with_content(format!("Turn's over because the bowl is empty. Well done {} and {}, you solved the following clues:\n{}",
                                           &performer,
                                           &guesser,
-                                          reply)))
+                                          reply))
+                    .with_redact_after(20))
             }
         })
         .await

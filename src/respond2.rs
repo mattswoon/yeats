@@ -1,3 +1,4 @@
+use tokio::time::{Duration, sleep};
 use serenity::{
     prelude::TypeMapKey,
     client::Context,
@@ -182,6 +183,7 @@ pub struct ResponseOk<'a> {
     pub dm_channel: Option<PrivateChannel>,
     pub react: Option<char>,
     pub content: Option<String>,
+    pub redact_after: Option<u64>,
 }
 
 impl<'a> ResponseOk<'a> {
@@ -193,6 +195,7 @@ impl<'a> ResponseOk<'a> {
             dm_channel: None,
             react: None,
             content: None,
+            redact_after: None,
         }
     }
 
@@ -223,6 +226,13 @@ impl<'a> ResponseOk<'a> {
             ..self
         }
     }
+
+    pub fn with_redact_after(self, redact_after: u64) -> ResponseOk<'a> {
+        ResponseOk {
+            redact_after: Some(redact_after),
+            ..self
+        }
+    }
 }
 
 #[async_trait]
@@ -232,25 +242,30 @@ impl<'a> Respondable for ResponseOk<'a> {
             self.message.react(self.context, r).await?;
         }
         if let Some(text) = self.content {
-            match (self.channel, self.dm_channel) {
+            let mut message = match (self.channel, self.dm_channel) {
                 (Some(chan), None) => {
                     chan.send_message(self.context, |m| m.content(&text))
-                        .await?;
+                        .await
                 },
                 (None, Some(dm_chan)) => {
                     dm_chan.send_message(self.context, |m| m.content(&text))
-                        .await?;
+                        .await
                 },
                 (Some(chan), Some(dm_chan)) => {
                     chan.send_message(self.context, |m| m.content(&text))
                         .await?;
                     dm_chan.send_message(self.context, |m| m.content(&text))
-                        .await?;
+                        .await
                 },
                 (None, None) => {
                     self.message.reply(self.context, text)
-                        .await?;
+                        .await
                 }
+            }?;
+            if let Some(redact_after) = self.redact_after {
+                sleep(Duration::from_secs(redact_after)).await;
+                message.edit(self.context, |m| m.content("*REDACTED*"))
+                    .await?;
             }
         }
         Ok(())

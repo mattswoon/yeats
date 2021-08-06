@@ -77,7 +77,6 @@ impl Game {
                     .to_string()
             },
             GameState::End => format!("Game as finished"),
-            _ => format!("I dunno??"),
         }
     }
 
