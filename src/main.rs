@@ -10,7 +10,6 @@ use serenity::{
         macros::{command, group},
     },
 };
-use itertools::Itertools;
 use yeats::{
     error::Error,
     game::{
@@ -30,15 +29,6 @@ use yeats::{
         ResponseOk,
     },
 };
-
-async fn get_main_channel(ctx: &Context) -> Result<Option<GuildChannel>, Error> {
-    ctx.data
-        .read()
-        .await
-        .get::<Game>()
-        .ok_or(Error::NoGame)
-        .map(|g| g.main_channel.clone())
-}
 
 #[command]
 async fn status(ctx: &Context, msg: &Message) -> CommandResult {
@@ -176,6 +166,8 @@ async fn start_turn(ctx: &Context, msg: &Message) -> CommandResult {
                     .with_dm_channel(dm_chan)
                     .with_content(format!("Your clue is:\n{}", clue)))
             } else {
+                // Not sure we should ever get to this state, maybe
+                // we should deliberately error if we do
                 g.end_turn(&performer, &guesser, round_number)?;
                 let reply = g.turn_summary()?.to_string();
                 let channel = g.main_channel.clone().ok_or(Error::NoChannel)?;
@@ -193,7 +185,18 @@ async fn start_turn(ctx: &Context, msg: &Message) -> CommandResult {
         .await?;
 
     log::info!("Starting timer for {} -> {}", &performer, &guesser);
-    sleep(Duration::from_secs(60)).await;
+    sleep(Duration::from_secs(50)).await;
+    Executor::new(ctx, msg)
+        .try_read(|g| {
+            let channel = g.main_channel.clone().ok_or(Error::NoChannel)?;
+            Ok(ResponseOk::new(ctx, msg)
+               .with_content("TEN SECONDS LEFT!!".to_string())
+               .with_channel(channel))
+        })
+        .await
+        .send()
+        .await?;
+    sleep(Duration::from_secs(10)).await;
     log::info!("Times up for {} -> {}", &performer, &guesser);
 
     let reply: String = Executor::new(ctx, msg)
@@ -273,17 +276,6 @@ async fn next_round(ctx: &Context, msg: &Message) -> CommandResult {
         .await
 }
 
-//async fn end_turn(ctx: &Context, performer: &Player, guesser: &Player) -> Result<(), Error> {
-//    ctx.data
-//        .write()
-//        .await
-//        .get_mut::<Game>()
-//        .ok_or(Error::NoGame)
-//        .and_then(|g| {
-//            g.end_turn(performer, guesser)
-//                .map_err(Error::GameError)})
-//}
-//
 #[group]
 #[commands(
     status, 
@@ -311,7 +303,7 @@ async fn main() {
         .expect("Couldn't init logger");
 
     let token = std::env::var("DISCORD_TOKEN")
-        .expect("Coulnd't get discord token");
+        .expect("Couldn't get discord token");
 
     let framework = StandardFramework::new()
         .configure(|c| c.prefix("!")
@@ -324,10 +316,10 @@ async fn main() {
         .event_handler(Handler)
         .framework(framework)
         .await
-        .expect("client go poo poo");
+        .expect("Couldn't build client");
 
     log::info!("Starting client...");
     client.start()
         .await
-        .expect("client start poo poo bum");
+        .expect("Couldn't start client");
 }

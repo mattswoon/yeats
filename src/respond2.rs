@@ -1,10 +1,8 @@
 use tokio::time::{Duration, sleep};
 use serenity::{
-    prelude::TypeMapKey,
     client::Context,
     framework::standard::CommandResult,
     model::{
-        user::User,
         channel::{
             GuildChannel,
             Message,

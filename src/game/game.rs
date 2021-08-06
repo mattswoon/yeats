@@ -1,7 +1,3 @@
-use std::{
-    iter::Cycle,
-    vec::IntoIter
-};
 use rand::{
     thread_rng,
     seq::SliceRandom,
@@ -9,7 +5,6 @@ use rand::{
 use serenity::{
     prelude::TypeMapKey,
     model::{
-        user::User,
         channel::GuildChannel,
     },
     utils::MessageBuilder,
@@ -29,7 +24,6 @@ pub struct Game {
     pub players: Vec<Player>,
     pub bowl: Bowl,
     pub state: GameState,
-    pub admin: Option<User>,
     pub num_rounds: i64,
     pub main_channel: Option<GuildChannel>
 }
@@ -44,7 +38,6 @@ impl Game {
             players: vec![],
             bowl: Bowl::new(),
             state: GameState::PreGame,
-            admin: None,
             num_rounds: 3,
             main_channel: None
         }
@@ -70,32 +63,14 @@ impl Game {
                     .as_ref()
                     .map(Turn::status)
                     .unwrap_or("".to_string());
-                format!("We're currently playing round {}. {}", 
+                format!("We're currently playing round {}. There are {} clues left to be solved. {}", 
                         &round.round_number, 
+                        self.bowl.num_unsolved(),
                         turn_status)
                     .trim()
                     .to_string()
             },
-            GameState::End => format!("Game as finished"),
-        }
-    }
-
-    pub fn set_admin(&mut self, user: User) {
-        self.admin = Some(user);
-    }
-
-    pub fn add_players(&mut self, p: &mut Vec<Player>) -> Result<Option<String>, GameError> {
-        match self.state {
-            GameState::PreGame => {
-                let reply = format!("Added players {}", p.iter()
-                                    .cloned()
-                                    .map(|p| p.name)
-                                    .collect::<Vec<_>>()
-                                    .join(", "));
-                (*self).players.append(p);
-                Ok(Some(reply))
-            },
-            _ => Err(GameError::AlreadyStarted)
+            GameState::End => format!("Game has ended"),
         }
     }
 
@@ -107,14 +82,6 @@ impl Game {
             },
             _ => Err(Error::GameAlreadyStarted)
         }
-    }
-
-    pub fn list_players(&self) -> Option<String> {
-        Some(self.players
-             .iter()
-             .map(|p| p.name.clone())
-             .collect::<Vec<_>>()
-             .join("\n"))
     }
 
     pub fn add_clue(&mut self, c: &Clue) -> Result<(), Error> {
@@ -187,14 +154,6 @@ impl Game {
         })
     }
 
-    pub fn ready_turn_message(&self) -> Result<String, GameError> {
-        match &self.state {
-            GameState::Round(r) => r.ready_turn_message(),
-            GameState::PreGame => Err(GameError::CantDoThat),
-            GameState::End => Err(GameError::CantDoThat),
-        }
-    }
-
     pub fn start_turn(&mut self) -> Result<(Turn, i64), Error> {
         let (new_state, turn, round_number) = match &self.state {
             GameState::Round(r) => r.clone()
@@ -232,17 +191,6 @@ impl Game {
         }
     }
 
-    pub fn current_performer(&self) -> Option<Player> {
-        match &self.state {
-            GameState::Round(Round { 
-                round_number: _,
-                turn_queue: _,
-                current_turn: Some(Turn { performer, guesser: _, state: _})
-            }) => Some(performer.clone()),
-            _ => None
-        }
-    }
-
     pub fn current_round_number(&self) -> Option<i64> {
         match &self.state {
             GameState::Round(r) => Some(r.round_number),
@@ -270,9 +218,9 @@ impl Game {
                         } else {
                             Err(Error::PlayerNotAllowedToDrawAClue)
                         },
-                    Some(Turn { performer, guesser, state: TurnState::Ready }) => 
+                    Some(Turn { state: TurnState::Ready, .. }) => 
                         Err(Error::CurrentTurnNotYetStarted),
-                    Some(Turn { performer, guesser, state: TurnState::Ended(_) }) => 
+                    Some(Turn { state: TurnState::Ended(_), .. }) => 
                         Err(Error::CurrentTurnHasEnded),
                     None => Err(Error::NoTurnsQueued),
                 }
