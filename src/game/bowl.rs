@@ -5,6 +5,7 @@ use rand::{
 use std::collections::HashMap;
 use crate::game::{
     clue::Clue,
+    player::Player,
 };
 
 #[derive(Debug, Clone)]
@@ -36,8 +37,10 @@ impl Bowl {
         self.unsolved.shuffle(&mut rng);
     }
 
-    pub fn draw_clue(&mut self) -> Option<Clue> {
-        let clue = self.unsolved.pop();
+    pub fn draw_clue(&mut self, not_entered_by: &Player) -> Option<Clue> {
+        let (clue, pool) = CluePool::new(self.unsolved.clone()).draw(|c| &c.entered_by == not_entered_by);
+        self.unsolved = pool.to_vec();
+
         log::debug!("{:?} being shown", &clue);
         self.showing = clue.clone();
         clue
@@ -92,5 +95,73 @@ impl Bowl {
             solved: vec![],
             showing: None
         }
+    }
+}
+
+struct CluePool<C> {
+    pool: Vec<C>,
+    rejected: Vec<C>
+}
+
+impl<C: Clone> CluePool<C> {
+    fn new(pool: Vec<C>) -> CluePool<C> {
+        CluePool { pool, rejected: vec![] }
+    }
+
+    fn to_vec(self) -> Vec<C> {
+        let CluePool { pool, rejected } = self;
+        [pool, rejected].concat().to_vec()
+    }
+
+    fn draw<F>(self, reject_if: F) -> (Option<C>, CluePool<C>) 
+    where
+        F: Fn(&C) -> bool
+    {
+        let CluePool { pool, rejected } = self;
+        match pool.split_first() {
+            Some((head, tail)) => {
+                let pool = tail.to_vec();
+                if reject_if(head) {
+                    let rejected = [rejected, vec![head.clone()]].concat().to_vec();
+                    return CluePool { pool, rejected }.draw(reject_if)
+                } else {
+                    return (Some(head.clone()), CluePool { pool, rejected })
+                }
+            },
+            None => {
+                let pool = vec![];
+                let mut rejected = rejected;
+                let clue = rejected.pop();
+                (clue, CluePool { pool, rejected })
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_clue_pool() {
+        let clues = [
+            ("player", "test clue"),
+            ("player", "a different clue"),
+            ("a different player", "even another clue")
+        ].to_vec();
+        let (clue, pool) = CluePool::new(clues).draw(|c| c.0 == "player");
+        assert_eq!(clue, Some(("a different player", "even another clue")));
+        assert_eq!(pool.to_vec(), [("player", "test clue"), ("player", "a different clue")].to_vec());
+    }
+    
+    #[test]
+    fn test_clue_pool_no_good_options() {
+        let clues = [
+            ("player", "test clue"),
+            ("player", "a different clue"),
+        ].to_vec();
+        let (clue, pool) = CluePool::new(clues).draw(|c| c.0 == "player");
+        assert_eq!(clue, Some(("player", "a different clue")));
+        assert_eq!(pool.to_vec(), [("player", "test clue")].to_vec());
     }
 }
