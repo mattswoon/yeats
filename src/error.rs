@@ -17,6 +17,7 @@ pub enum Error {
     TurnDoesntMatchPlayers,
     PlayerNotAllowedToDrawAClue,
     EmptyBowl,
+    BowlNotEmpty,
 }
 
 impl std::fmt::Display for Error {
@@ -51,6 +52,8 @@ impl std::fmt::Display for Error {
                 write!(f, "Not allowed to draw a clue"),
             Error::EmptyBowl =>
                 write!(f, "Bowl is empty"),
+            Error::BowlNotEmpty =>
+                write!(f, "Bowl isn't empty"),
         }
     }
 }

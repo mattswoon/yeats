@@ -7,6 +7,7 @@ use crate::game::{
     clue::Clue,
 };
 
+#[derive(Debug, Clone)]
 pub struct Bowl {
     unsolved: Vec<Clue>,
     solved: Vec<Clue>,
@@ -79,5 +80,17 @@ impl Bowl {
 
     pub fn num_unsolved(&self) -> usize {
         self.unsolved.len()
+    }
+
+    pub fn refill(self) -> Bowl {
+        let unsolved = self.unsolved
+            .into_iter()
+            .chain(self.solved.into_iter())
+            .collect();
+        Bowl {
+            unsolved,
+            solved: vec![],
+            showing: None
+        }
     }
 }

@@ -263,6 +263,20 @@ async fn next_clue(ctx: &Context, msg: &Message) -> CommandResult {
         .await
 }
 
+#[command]
+#[aliases("next-round")]
+async fn next_round(ctx: &Context, msg: &Message) -> CommandResult {
+    Executor::new(ctx, msg)
+        .try_write(|g| {
+            g.advance_game()?;
+            Ok(ResponseOk::new(ctx, msg)
+               .with_content(g.status()))
+        })
+        .await
+        .send()
+        .await
+}
+
 //async fn end_turn(ctx: &Context, performer: &Player, guesser: &Player) -> Result<(), Error> {
 //    ctx.data
 //        .write()
@@ -284,6 +298,7 @@ async fn next_clue(ctx: &Context, msg: &Message) -> CommandResult {
     next_turn,
     start_turn,
     next_clue,
+    next_round,
 )]
 struct Yeats;
 

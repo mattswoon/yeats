@@ -127,24 +127,34 @@ impl Game {
         }
     }
 
-    pub fn advance_game(&mut self) -> Result<(), GameError> {
-        match &self.state {
+    pub fn advance_game(&mut self) -> Result<(), Error> {
+        let new_state = match &self.state {
             GameState::PreGame => {
-                self.state = GameState::Round(
-                    Round::new(1, &self.players)
-                )
-            },
-            GameState::Round(r) => {
-                if r.round_number < self.num_rounds {
-                    self.state = GameState::Round(
-                        Round::new(r.round_number + 1, &self.players)
-                    )
+                if self.main_channel.is_none() {
+                    Err(Error::NoChannel)
                 } else {
-                    self.state = GameState::End
+                    Ok(GameState::Round(
+                        Round::new(1, &self.players)
+                    ))
                 }
             },
-            GameState::End => ()
-        }
+            GameState::Round(r) => {
+                if self.bowl.num_unsolved() > 0 {
+                    Err(Error::BowlNotEmpty)
+                } else {
+                    if r.round_number < self.num_rounds {
+                        self.bowl = self.bowl.clone().refill();
+                        Ok(GameState::Round(
+                            Round::new(r.round_number + 1, &self.players)
+                        ))
+                    } else {
+                        Ok(GameState::End)
+                    }
+                }
+            },
+            GameState::End => Err(Error::GameFinished)
+        }?;
+        self.state = new_state;
         Ok(())
     }
 
