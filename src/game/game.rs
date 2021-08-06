@@ -50,7 +50,7 @@ impl Game {
     pub fn status(&self) -> String {
         match &self.state {
             GameState::PreGame => {
-                format!("Game is yet to start, feel free to join or add more clues.\n\tPlayers:\t{}\n\tClues added:\t{}", 
+                format!("Game is yet to start, feel free to join or add more clues.\n\tPlayers:\n\t\t{}\n\tClues added:\n\t\t{}", 
                         self.players
                             .iter()
                             .map(|p| p.name.clone())
