@@ -274,6 +274,8 @@ impl<'a> Respondable for ResponseOk<'a> {
 impl<'a> Respondable for ResponseErr<'a> {
     async fn send(self) -> CommandResult {
         log::warn!("{}: {}", self.message.author, self.error);
+        self.message.react(self.context, '🚫')
+            .await?;
         self.message.reply(self.context, self.error)
             .await?;
         Ok(())
