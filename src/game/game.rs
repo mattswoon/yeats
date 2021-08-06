@@ -209,7 +209,7 @@ impl Game {
                                 .unwrap_or(summ.clone());
                             
                             self.bowl.solve_showing_clue();
-                            let clue = self.bowl.draw_clue();
+                            let clue = self.bowl.draw_clue(guesser);
                             Ok((DrawClue {
                                 clue: clue,
                                 performer: performer.clone(),
