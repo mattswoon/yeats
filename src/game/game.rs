@@ -77,7 +77,9 @@ impl Game {
     pub fn add_player(&mut self, p: Player) -> Result<(), Error> {
         match self.state {
             GameState::PreGame => {
-                (*self).players.push(p);
+                if !(self.players.contains(&p)) {
+                    (*self).players.push(p);
+                }
                 Ok(())
             },
             _ => Err(Error::GameAlreadyStarted)
